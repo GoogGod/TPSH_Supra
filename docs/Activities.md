@@ -130,3 +130,78 @@
 ---
 
 ## Сводная карта: процесс → activities
+
+РП Регистрация персонала
+└─ users/services.create_employee
+└─ users/services.assign_role
+
+ПД Подача доступности
+└─ shifts/services/availability.submit_availability
+└─ shifts/services/availability.update_availability_period
+└─ shifts/services/availability.delete_availability_period
+
+СД Сбор данных
+└─ forecasting/services/collector.record_actual_load
+└─ forecasting/services/collector.import_historical_csv
+└─ forecasting/services/evaluator.log_forecast_result
+
+ОМ Обучение модели
+└─ forecasting/services/collector.build_feature_matrix
+└─ forecasting/services/collector.enrich_with_calendar
+└─ forecasting/services/collector.detect_anomalies
+└─ forecasting/services/predictor.train_model
+└─ forecasting/services/predictor.select_best_model
+
+ПЗ Прогнозирование загрузки
+└─ forecasting/services/collector.build_feature_matrix
+└─ forecasting/services/predictor.predict_load_range
+└─ forecasting/services/predictor.get_staffing_forecast
+
+ФР Формирование расписания
+└─ forecasting/services/predictor.get_staffing_forecast ← из ПЗ
+└─ shifts/services/availability.get_availability_matrix
+└─ shifts/services/availability.clear_outdated_availability
+└─ shifts/services/scheduler.ensure_shifts_exist
+└─ shifts/services/scheduler.assign_employees_to_shifts
+└─ shifts/services/validators.validate_assignment
+└─ shifts/services/validators.check_rest_between_shifts
+└─ shifts/services/validators.check_weekly_hours_limit
+└─ shifts/services/scheduler.optimize_distribution
+└─ shifts/services/validators.detect_conflicts_in_schedule
+
+КР Корректировка расписания
+└─ shifts/services/scheduler.assign_employee_manually
+└─ shifts/services/scheduler.move_employee
+└─ shifts/services/scheduler.unassign_employee
+└─ shifts/services/validators.validate_assignment
+└─ shifts/services/validators.validate_manual_move
+└─ shifts/services/validators.check_rest_between_shifts
+└─ shifts/services/validators.check_weekly_hours_limit
+
+ОТ Оценка точности
+└─ forecasting/services/evaluator.evaluate_accuracy
+└─ forecasting/services/evaluator.compare_prediction_vs_actual
+└─ forecasting/services/evaluator.get_model_metrics
+└─ forecasting/services/evaluator.check_retraining_needed
+
+---
+
+## Зависимости между модулями
+
+users/services ──────────────────────── (нет зависимостей от других сервисов)
+
+shifts/services/availability ────────── (нет зависимостей от других сервисов)
+
+shifts/services/validators ──────────── shifts.models (Shift, ShiftAssignment, Availability)
+
+shifts/services/scheduler ───────────┬─ shifts/services/availability (матрица доступности)
+├─ shifts/services/validators (валидация назначений)
+└─ forecasting/services/predictor (прогноз потребности)
+
+forecasting/services/collector ──────── (нет зависимостей от других сервисов)
+
+forecasting/services/predictor ──────── forecasting/services/collector (feature matrix)
+
+forecasting/services/evaluator ──────── forecasting/services/collector (исторические данные)
+
+> Зависимости — однонаправленные. `users` и `forecasting` не знают друг о друге. `shifts/scheduler` — единственный модуль, зависящий от `forecasting`. Циклических зависимостей нет.
