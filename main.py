@@ -136,7 +136,8 @@ def main(
         print(f"   По: {forecast['datetime'].max()}")
         print(f"   Всего часов: {len(forecast)}")
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
-        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f}")
+        print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
+        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
     
 
 

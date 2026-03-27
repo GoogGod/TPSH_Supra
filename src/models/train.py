@@ -26,7 +26,6 @@ def train(
     if verbose:
         print("ОБУЧЕНИЕ МОДЕЛИ")
         print(f"Всего записей в df_agg: {len(df_agg)}")
-        print(f"Колонки в df_agg: {list(df_agg.columns)}")
     
     # Проверка: достаточно ли данных
     if len(df_agg) < 100:
@@ -43,6 +42,17 @@ def train(
     
     if verbose:
         print(f"Используемые признаки: {len(available_features)}")
+    
+    # Рассчитать средний коэффициент гостей на заказ
+    if 'guests_count' in df_agg.columns and 'orders_count' in df_agg.columns:
+        total_orders = df_agg['orders_count'].sum()
+        total_guests = df_agg['guests_count'].sum()
+        avg_guests_per_order = total_guests / max(total_orders, 1)
+    else:
+        avg_guests_per_order = 2.3  # Значение по умолчанию
+    
+    if verbose:
+        print(f"Среднее гостей на заказ: {avg_guests_per_order:.2f}")
     
     X = df_agg[available_features]
     y = df_agg[TARGET_COLUMN]
@@ -106,12 +116,12 @@ def train(
     y_pred_train_rounded = np.maximum(0, np.round(y_pred_train)).astype(int)
     
     metrics = {
-        'test_mae': mean_absolute_error(y_test, y_pred_test_rounded),
-        'test_rmse': np.sqrt(mean_squared_error(y_test, y_pred_test)),
-        'test_r2': r2_score(y_test, y_pred_test),
-        'train_mae': mean_absolute_error(y_train, y_pred_train_rounded),
-        'train_rmse': np.sqrt(mean_squared_error(y_train, y_pred_train)),
-        'train_r2': r2_score(y_train, y_pred_train),
+        'test_mae': float(mean_absolute_error(y_test, y_pred_test_rounded)),
+        'test_rmse': float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
+        'test_r2': float(r2_score(y_test, y_pred_test)),
+        'train_mae': float(mean_absolute_error(y_train, y_pred_train_rounded)),
+        'train_rmse': float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
+        'train_r2': float(r2_score(y_train, y_pred_train)),
         'model_type': model_type,
         'n_features': len(available_features),
         'feature_cols': available_features,
@@ -143,11 +153,13 @@ def train(
         if model_dir and not os.path.exists(model_dir):
             os.makedirs(model_dir)
         
+        # Сохраняем коэффициент гостей вместе с моделью
         model_data = {
             'model': model,
             'feature_cols': available_features,
             'metrics': metrics,
-            'orders_per_waiter': 12
+            'avg_guests_per_order': avg_guests_per_order,
+            'target_column': TARGET_COLUMN
         }
         
         joblib.dump(model_data, model_path)

@@ -31,7 +31,9 @@ def save_forecast_to_csv(
         'is_weekend',
         'is_holiday',
         'orders_predicted',
-        'orders_with_buffer'
+        'orders_with_buffer',
+        'guests_predicted',  
+        'guests_with_buffer'
     ]
     
     detail_columns = [
