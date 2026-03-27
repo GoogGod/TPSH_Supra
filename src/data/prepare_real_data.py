@@ -10,9 +10,6 @@ def prepare_real_dataset(
     add_weather: bool = True,
     verbose: bool = True
 ):
-    """
-    Подготавливает реальный датасет: добавляет погоду, сохраняет в CSV.
-    """
     if input_file is None:
         input_file = f'{DATA_RAW_DIR}/real_orders.xlsx'
     

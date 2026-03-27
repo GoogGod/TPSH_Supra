@@ -6,7 +6,6 @@ from src.config import DATA_RAW_DIR, DATA_PROC_DIR
 
 
 def analyze_raw_data(file_path: str) -> dict:
-    """Анализирует сырые данные и возвращает статистику."""
     df = pd.read_excel(file_path, header=1)
     
     stats = {
@@ -62,7 +61,6 @@ def create_enhanced_dataset(
     output_file: str,
     verbose: bool = True
 ) -> pd.DataFrame:
-    """Создаёт улучшенный датасет для обучения."""
     if verbose:
         print("Загрузка данных...")
     
@@ -125,18 +123,11 @@ def process_raw_data(
     output_file: str = None,
     verbose: bool = True
 ) -> Tuple[str, dict]:
-    """
-    Основная функция для обработки данных в пайплайне.
-    
-    Возвращает:
-        output_file: Путь к обработанному файлу
-        stats: Статистика обработки
-    """
     if input_file is None:
-        input_file = DATA_RAW_DIR / 'real_orders.xlsx'
+        input_file = f'{DATA_RAW_DIR}/real_orders.xlsx'
     
     if output_file is None:
-        output_file = DATA_PROC_DIR / 'processed_orders.csv'
+        output_file = f'{DATA_PROC_DIR}/processed_orders.csv'
     
     input_file = Path(input_file)
     output_file = Path(output_file)
@@ -145,13 +136,11 @@ def process_raw_data(
         raise FileNotFoundError(f"Исходный файл не найден: {input_file}")
     
     if verbose:
-        print("\n" + "=" * 70)
         print("ОБРАБОТКА СЫРЫХ ДАННЫХ")
-        print("=" * 70)
     
     # Анализ
     if verbose:
-        print("\n[1/2] Анализ сырых данных...")
+        print("\nАнализ сырых данных...")
     stats = analyze_raw_data(input_file)
     
     if verbose:
@@ -165,14 +154,12 @@ def process_raw_data(
     
     # Обработка
     if verbose:
-        print("\n[2/2] Создание улучшенного датасета...")
+        print("\nСоздание улучшенного датасета...")
     
     df_processed = create_enhanced_dataset(input_file, output_file, verbose=verbose)
     
     if verbose:
-        print("\n" + "=" * 70)
         print("ОБРАБОТКА ЗАВЕРШЕНА")
-        print("=" * 70)
         print(f"Исходный файл: {input_file}")
         print(f"Обработанный файл: {output_file}")
     

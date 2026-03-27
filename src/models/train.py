@@ -20,9 +20,6 @@ def train(
     model_path: str = None,
     verbose: bool = True
 ) -> Tuple[object, dict]:
-    """
-    Обучает модель на подготовленных данных.
-    """
     test_size = test_size or TEST_SIZE
     random_state = random_state or RANDOM_STATE
     

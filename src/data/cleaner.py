@@ -3,9 +3,6 @@ from typing import Optional
 import numpy as np
 
 def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
-    """
-    Очищает сырой DataFrame (поддерживает Excel и CSV).
-    """
     df_clean = df.copy()
     
     stats = {
@@ -16,7 +13,7 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         'invalid_rows_removed': 0
     }
     
-    # Нормализация имён колонок (русские → английские)
+    # Нормализация имён колонок
     df_clean = _normalize_column_names(df_clean)
     
     # Создание order_id если нет
@@ -35,13 +32,13 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         if 'order_datetime' not in df_clean.columns:
             df_clean['order_datetime'] = pd.NaT
     
-    # 1. Удаление дубликатов
+    # Удаление дубликатов
     initial_count = len(df_clean)
     if 'order_id' in df_clean.columns:
         df_clean = df_clean.drop_duplicates(subset=['order_id'], keep='first')
     stats['duplicates_removed'] = initial_count - len(df_clean)
     
-    # 2. Стандартизация названий колонок
+    # Стандартизация названий колонок
     df_clean.columns = (
         df_clean.columns
         .str.strip()
@@ -50,7 +47,7 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         .str.replace('-', '_')
     )
     
-    # 3. Преобразование типов данных
+    # Преобразование типов данных
     if 'order_datetime' in df_clean.columns:
         df_clean['order_datetime'] = pd.to_datetime(df_clean['order_datetime'], errors='coerce')
     
@@ -64,7 +61,7 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
         if col in df_clean.columns:
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
     
-    # 4. Обработка пропусков
+    # Обработка пропусков
     critical_cols = ['order_id', 'order_datetime']
     for col in critical_cols:
         if col in df_clean.columns:
@@ -73,14 +70,14 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
                 df_clean = df_clean.dropna(subset=[col])
                 stats['invalid_rows_removed'] += null_count
     
-    # 5. Валидация значений
+    # Валидация значений
     if 'total_bill' in df_clean.columns:
         invalid = df_clean['total_bill'] < 0
         if invalid.sum() > 0:
             df_clean = df_clean[~invalid]
             stats['invalid_rows_removed'] += invalid.sum()
     
-    # 6. Сортировка по времени
+    # Сортировка по времени
     if 'order_datetime' in df_clean.columns:
         df_clean = df_clean.sort_values('order_datetime').reset_index(drop=True)
     
@@ -104,9 +101,6 @@ def clean_raw_dataframe(df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
 
 
 def _normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Приводит русские названия колонок к английским.
-    """
     df = df.copy()
     
     mapping = {

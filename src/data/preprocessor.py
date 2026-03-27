@@ -8,10 +8,6 @@ ru_holidays = holidays.Russia()
 
 
 def prepare_features(df: pd.DataFrame, verbose: bool = True) -> Tuple[pd.DataFrame, List]:
-    """
-    Подготавливает признаки для обучения модели.
-    Работает с ОБРАБОТАННЫМ датасетом (CSV).
-    """
     df = df.copy()
     
     if verbose:
@@ -49,8 +45,6 @@ def prepare_features(df: pd.DataFrame, verbose: bool = True) -> Tuple[pd.DataFra
 
 
 def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
-    """Генерирует признаки."""
-    
     df_agg['hour'] = df_agg['datetime'].dt.hour
     df_agg['hour_encoded'] = np.sin(2 * np.pi * df_agg['hour'] / 24)
     
@@ -93,7 +87,7 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['rolling_mean_24h'] = df_agg['orders_count'].rolling(24, min_periods=1).mean()
     df_agg['rolling_std_24h'] = df_agg['orders_count'].rolling(24, min_periods=1).std()
     
-    # Погодные признаки (если есть)
+    # Погодные признаки
     weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']
     for col in weather_cols:
         if col in df_agg.columns:
@@ -117,7 +111,6 @@ def prepare_for_prediction(
     feature_cols: List,
     verbose: bool = True
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Подготавливает данные для предсказания."""
     from datetime import timedelta
     
     future_hours = []

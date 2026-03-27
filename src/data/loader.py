@@ -3,9 +3,6 @@ from pathlib import Path
 from typing import Union
 
 def load_raw_dataset(file_path: Union[str, Path]) -> pd.DataFrame:
-    """
-    Загружает сырой датасет (CSV или Excel).
-    """
     file_path = Path(file_path)
     
     if not file_path.exists():

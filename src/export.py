@@ -10,9 +10,6 @@ def save_forecast_to_csv(
     include_details: bool = True,
     verbose: bool = True
 ) -> str:
-    """
-    Сохраняет прогноз в CSV формате.
-    """
     if output_path is None:
         from src.config import DATA_PRED_DIR
         output_path = DATA_PRED_DIR / 'forecast.csv'

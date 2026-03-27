@@ -7,18 +7,7 @@ import time
 
 
 class WeatherParser:
-    """
-    Парсер погодных данных через Open-Meteo API.
-    """
-    
     def __init__(self, latitude: float = 43.1056, longitude: float = 131.8735):
-        """
-        Инициализация парсера.
-        
-        Параметры:
-            latitude: Широта (по умолчанию Владивосток)
-            longitude: Долгота (по умолчанию Владивосток)
-        """
         self.latitude = latitude
         self.longitude = longitude
         self.base_url = "https://archive-api.open-meteo.com/v1/archive"
@@ -29,9 +18,6 @@ class WeatherParser:
         end_date: str,
         verbose: bool = True
     ) -> pd.DataFrame:
-        """
-        Получает погодные данные за период.
-        """
         params = {
             'latitude': self.latitude,
             'longitude': self.longitude,
@@ -78,7 +64,6 @@ class WeatherParser:
             return self._generate_fallback_weather(start_date, end_date)
     
     def _add_weather_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Добавляет производные погодные признаки."""
         df = df.copy()
         
         df['is_rainy'] = (df['precipitation'] > 0.5).astype(int)
@@ -97,7 +82,6 @@ class WeatherParser:
         return df
     
     def _decode_weather_code(self, code: int) -> str:
-        """Декодирует код погоды WMO."""
         codes = {
             0: 'ясно',
             1: 'преимущественно_ясно',
@@ -125,7 +109,6 @@ class WeatherParser:
         return codes.get(code, 'неизвестно')
     
     def _get_temp_comfort(self, temp: float) -> str:
-        """Определяет комфортность температуры."""
         if temp < -10:
             return 'очень_холодно'
         elif temp < 0:
@@ -145,7 +128,6 @@ class WeatherParser:
         end_date: str,
         verbose: bool = True
     ) -> pd.DataFrame:
-        """Генерирует реалистичные погодные данные для Владивостока."""
         if verbose:
             print("API недоступен, генерирую реалистичные погодные данные для Владивостока")
         
@@ -178,9 +160,6 @@ def merge_weather_with_orders(
     weather_df: pd.DataFrame,
     verbose: bool = True
 ) -> pd.DataFrame:
-    """
-    Объединяет данные о заказах с погодными данными.
-    """
     df = orders_df.copy()
     
     df['order_date'] = pd.to_datetime(df['order_datetime']).dt.date

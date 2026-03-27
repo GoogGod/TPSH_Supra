@@ -17,9 +17,6 @@ def predict(
     hours_ahead: int = 168,
     verbose: bool = True
 ) -> pd.DataFrame:
-    """
-    Делает почасовой прогноз количества заказов.
-    """
     model_path = model_path or str(MODEL_FILE)
     raw_data_path = raw_data_path or str(RAW_DATA_FILE)
     
@@ -102,9 +99,6 @@ def predict(
 
 
 def _clean_for_predict(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Минимальная очистка для предсказания.
-    """
     df = df.copy()
     
     if 'order_datetime' not in df.columns and 'datetime' in df.columns:
@@ -131,7 +125,6 @@ def _clean_for_predict(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _print_forecast_report(df_pred: pd.DataFrame):
-    """Выводит отчёт по прогнозу."""
     print("\nПРОГНОЗ ПО ЧАСАМ (первые 24 часа)")
     print(f"{'Дата-время':<20} {'Час':<6} {'День':<6} {'Пик':<6} {'Заказов':<10} {'С буфером':<12}")
     print("-" * 60)
