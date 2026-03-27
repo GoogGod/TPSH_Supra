@@ -3,9 +3,12 @@ from src.data.loader import load_raw_dataset
 from src.data.preprocessor import prepare_features
 from src.models.train import train
 from src.models.predict import predict
-from src.models.evaluate import evaluate_model 
+from src.models.evaluate import evaluate_model
 from src.export import save_forecast_to_csv
-from src.config import RAW_EXCEL_FILE, RAW_DATA_FILE, MODEL_FILE, DATA_PRED_DIR, FEATURE_COLS
+from src.config import (
+    RAW_EXCEL_FILE, RAW_DATA_FILE,
+    MODEL_FILE, DATA_PRED_DIR, FEATURE_COLS
+)
 from pathlib import Path
 from typing import Optional, Union
 from datetime import datetime
@@ -21,7 +24,9 @@ def main(
     to_date: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
     verbose: bool = True
-):  
+):
+    print("СИСТЕМА ПРОГНОЗИРОВАНИЯ ЗАКАЗОВ И ГОСТЕЙ")
+    
     # Обработка сырых данных
     if process_data:
         print("ОБРАБОТКА СЫРЫХ ДАННЫХ")
@@ -62,6 +67,8 @@ def main(
     
     # Обучение модели
     if train_model:
+        print("ОБУЧЕНИЕ МОДЕЛИ")
+        
         model, metrics = train(
             df_agg=df_agg,
             feature_cols=feature_cols,
@@ -76,6 +83,8 @@ def main(
     
     # Оценка модели
     if evaluate and train_model:
+        print("ОЦЕНКА МОДЕЛИ")
+        
         eval_metrics = evaluate_model(
             model_path=str(MODEL_FILE),
             data_path=str(RAW_DATA_FILE),
@@ -129,28 +138,28 @@ def main(
     
     if metrics or eval_metrics:
         m = eval_metrics if eval_metrics else metrics
-
+        
         print(f"\nМЕТРИКИ МОДЕЛИ")
-
+                
         # ЗАКАЗЫ
         print(f"\n{'ЗАКАЗЫ':^70}")
         print(f"{'MAE (Test):':<25} {m.get('test_mae', m.get('orders_mae', 'N/A')):>15.2f}")
         print(f"{'RMSE (Test):':<25} {m.get('test_rmse', m.get('orders_rmse', 'N/A')):>15.2f}")
         print(f"{'R² (Test):':<25} {m.get('test_r2', m.get('orders_r2', 'N/A')):>15.3f}")
-
+        
         # ГОСТИ
-        print(f"\n{'ГОСТИ':^70}")
+        print(f"\n{'ГОСТИ (через конверсию)':^70}")
         print(f"{'MAE (Test):':<25} {m.get('guests_mae', 'N/A'):>15.2f}")
         print(f"{'RMSE (Test):':<25} {m.get('guests_rmse', 'N/A'):>15.2f}")
         print(f"{'R² (Test):':<25} {m.get('guests_r2', 'N/A'):>15.3f}")
-
+        
         # КОНВЕРСИЯ
         print(f"\n{'КОНВЕРСИЯ':^70}")
         print(f"{'Среднее гостей на заказ:':<25} {m.get('avg_guests_per_order', 'N/A'):>15.2f}")
-
+    
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
-
+    
     if forecast is not None:
         print(f"\nПериод прогноза:")
         print(f"   С: {forecast['datetime'].min()}")
@@ -158,8 +167,8 @@ def main(
         print(f"   Всего часов: {len(forecast)}")
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
         print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
-        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")  
-
+        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
+    
 
 if __name__ == '__main__':
     main(

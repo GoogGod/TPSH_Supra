@@ -4,5 +4,5 @@ venv
 forecast.csv
 processed_orders.csv
 real_orders.xlsx
-waiter_staffing_model.pkl
+model_orders.pkl
 __pycache__

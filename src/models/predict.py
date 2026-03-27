@@ -5,9 +5,10 @@ from typing import Optional, Union
 from datetime import datetime, timedelta
 import os
 from src.config import (
-    MODEL_FILE, RAW_DATA_FILE, 
-    WORKING_HOUR_START, WORKING_HOUR_END, 
-    MIN_ORDERS_PER_HOUR
+    MODEL_FILE, RAW_DATA_FILE,
+    WORKING_HOUR_START, WORKING_HOUR_END,
+    MIN_ORDERS_PER_HOUR, MIN_GUESTS_PER_HOUR,
+    AVG_GUESTS_PER_ORDER
 )
 from src.data.loader import load_raw_dataset
 from src.data.preprocessor import prepare_for_prediction, prepare_features
@@ -25,7 +26,8 @@ def predict(
     raw_data_path = raw_data_path or str(RAW_DATA_FILE)
     
     if verbose:
-        print("ПРОГНОЗ КОЛИЧЕСТВА ЗАКАЗОВ ПО ЧАСАМ")
+        print("ПРОГНОЗ КОЛИЧЕСТВА ЗАКАЗОВ И ГОСТЕЙ")
+        print("Используется: 1 модель + конверсия гостей")
     
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Модель не найдена: {model_path}")
@@ -34,13 +36,13 @@ def predict(
     model = model_data['model']
     feature_cols = model_data['feature_cols']
     
-    # Загружаем коэффициент гостей
-    avg_guests_per_order = model_data.get('avg_guests_per_order', 2.3)
+    # 🔥 Загружаем коэффициент конверсии из модели
+    avg_guests = model_data.get('avg_guests_per_order', AVG_GUESTS_PER_ORDER)
     
     if verbose:
         print(f"Модель: {model_data['metrics']['model_type']}")
         print(f"Признаков: {len(feature_cols)}")
-        print(f"Среднее гостей на заказ: {avg_guests_per_order:.2f}")
+        print(f"Среднее гостей на заказ: {avg_guests:.2f}")
     
     # Загрузка и подготовка истории
     df = load_raw_dataset(raw_data_path)
@@ -77,24 +79,28 @@ def predict(
         verbose=verbose
     )
     
-    # Предсказание заказов
+    # ПРЕДСКАЗАНИЕ ЗАКАЗОВ
     X_pred = df_pred[feature_cols]
-    predictions = model.predict(X_pred)
+    predictions_orders = model.predict(X_pred)
+    df_pred['orders_predicted'] = np.maximum(0, np.round(predictions_orders)).astype(int)
     
-    df_pred['orders_predicted'] = np.maximum(0, np.round(predictions)).astype(int)
-    
-    # Прогноз гостей через конверсию
-    df_pred['guests_predicted'] = (df_pred['orders_predicted'] * avg_guests_per_order).round().astype(int)
+    # ГОСТИ ЧЕРЕЗ КОНВЕРСИЮ (вместо отдельной модели)
+    df_pred['guests_predicted'] = (df_pred['orders_predicted'] * avg_guests).round().astype(int)
     
     # Буферы (+25%)
     df_pred['orders_with_buffer'] = (df_pred['orders_predicted'] * 1.25).astype(int)
     df_pred['guests_with_buffer'] = (df_pred['guests_predicted'] * 1.25).astype(int)
     
+    # ФИЛЬТР НОЧНЫХ ЧАСОВ (23:00-09:59)
+    night_hours_mask = (df_pred['hour'] < WORKING_HOUR_START) | (df_pred['hour'] >= WORKING_HOUR_END)
+    
+    df_pred.loc[night_hours_mask, 'orders_predicted'] = 0
+    df_pred.loc[night_hours_mask, 'guests_predicted'] = 0
+    df_pred.loc[night_hours_mask, 'orders_with_buffer'] = 0
+    df_pred.loc[night_hours_mask, 'guests_with_buffer'] = 0
+    
     # Минимальный порог в рабочие часы
-    working_hours_mask = (
-        (df_pred['hour'] >= WORKING_HOUR_START) & 
-        (df_pred['hour'] < WORKING_HOUR_END)
-    )
+    working_hours_mask = ~night_hours_mask
     
     df_pred.loc[working_hours_mask, 'orders_predicted'] = df_pred.loc[
         working_hours_mask, 'orders_predicted'
@@ -102,7 +108,7 @@ def predict(
     
     df_pred.loc[working_hours_mask, 'guests_predicted'] = df_pred.loc[
         working_hours_mask, 'guests_predicted'
-    ].clip(lower=1)
+    ].clip(lower=MIN_GUESTS_PER_HOUR)
     
     df_pred.loc[working_hours_mask, 'orders_with_buffer'] = df_pred.loc[
         working_hours_mask, 'orders_with_buffer'
@@ -110,13 +116,13 @@ def predict(
     
     df_pred.loc[working_hours_mask, 'guests_with_buffer'] = df_pred.loc[
         working_hours_mask, 'guests_with_buffer'
-    ].clip(lower=1)
+    ].clip(lower=MIN_GUESTS_PER_HOUR)
     
     if verbose:
         _print_forecast_report(df_pred)
     
-    return df_pred[['datetime', 'hour', 'day_of_week', 'is_peak_hour', 
-                    'is_weekend', 'is_holiday', 
+    return df_pred[['datetime', 'hour', 'day_of_week', 'is_peak_hour',
+                    'is_weekend', 'is_holiday',
                     'orders_predicted', 'orders_with_buffer',
                     'guests_predicted', 'guests_with_buffer',
                     'lag_orders_1h', 'lag_orders_24h', 'rolling_mean_24h']]
@@ -178,13 +184,17 @@ def _print_forecast_report(df_pred: pd.DataFrame):
     print(f"{'Заказы:':<20} среднее {df_pred['orders_predicted'].mean():.2f}/час, всего {df_pred['orders_predicted'].sum()}")
     print(f"{'Гости:':<20}  среднее {df_pred['guests_predicted'].mean():.2f}/час, всего {df_pred['guests_predicted'].sum()}")
     
-    peak_avg_orders = df_pred[df_pred['is_peak_hour'] == 1]['orders_predicted'].mean()
-    offpeak_avg_orders = df_pred[df_pred['is_peak_hour'] == 0]['orders_predicted'].mean()
-    peak_avg_guests = df_pred[df_pred['is_peak_hour'] == 1]['guests_predicted'].mean()
-    offpeak_avg_guests = df_pred[df_pred['is_peak_hour'] == 0]['guests_predicted'].mean()
+    # Разделение на рабочие и ночные часы
+    working_mask = (df_pred['hour'] >= WORKING_HOUR_START) & (df_pred['hour'] < WORKING_HOUR_END)
+    night_mask = ~working_mask
     
-    print(f"\nСреднее в пиковые часы: {peak_avg_orders:.2f} заказов, {peak_avg_guests:.2f} гостей")
-    print(f"Среднее в непиковые: {offpeak_avg_orders:.2f} заказов, {offpeak_avg_guests:.2f} гостей")
+    print(f"\nРабочие часы ({WORKING_HOUR_START}:00-{WORKING_HOUR_END}:00):")
+    print(f"   Заказы: {df_pred[working_mask]['orders_predicted'].mean():.2f}/час, всего {df_pred[working_mask]['orders_predicted'].sum()}")
+    print(f"   Гости:  {df_pred[working_mask]['guests_predicted'].mean():.2f}/час, всего {df_pred[working_mask]['guests_predicted'].sum()}")
+    
+    print(f"\nНочные часы (00:00-{WORKING_HOUR_START}:00, {WORKING_HOUR_END}:00-23:00):")
+    print(f"   Заказы: {df_pred[night_mask]['orders_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['orders_predicted'].sum()}")
+    print(f"   Гости:  {df_pred[night_mask]['guests_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['guests_predicted'].sum()}")
     
     # Прогноз по дням
     print(f"\nПрогноз по дням:")

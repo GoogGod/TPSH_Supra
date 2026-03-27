@@ -14,6 +14,7 @@ def prepare_features(df: pd.DataFrame, verbose: bool = True) -> Tuple[pd.DataFra
         print(f"\nВходные данные: {len(df)} записей")
         print(f"Колонки: {list(df.columns)}")
     
+    # Проверяем datetime
     if 'datetime' not in df.columns:
         if 'order_datetime' in df.columns:
             df.rename(columns={'order_datetime': 'datetime'}, inplace=True)
@@ -27,19 +28,24 @@ def prepare_features(df: pd.DataFrame, verbose: bool = True) -> Tuple[pd.DataFra
         print(f"\nКорректных дат: {len(df)} из {len(df)}")
         print(f"Диапазон: {df['datetime'].min()} — {df['datetime'].max()}")
     
-    # Целевая переменная
+    # Целевые переменные
     if TARGET_COLUMN not in df.columns:
         if 'orders_count' in df.columns:
             df[TARGET_COLUMN] = df['orders_count']
         else:
-            raise ValueError("Целевая переменная не найдена!")
+            raise ValueError("Целевая переменная orders_count не найдена!")
+    
+    if 'guests_count' not in df.columns:
+        raise ValueError("Колонка 'guests_count' не найдена!")
     
     df_agg = _generate_features(df)
     
     if verbose:
         print(f"Сгенерировано {len(FEATURE_COLS)} признаков")
-        print(f"Статистика целевой переменной:")
+        print(f"Статистика целевой переменной (заказы):")
         print(df_agg[TARGET_COLUMN].describe())
+        print(f"\nСтатистика целевой переменной (гости):")
+        print(df_agg['guests_count'].describe())
     
     return df_agg, FEATURE_COLS
 
@@ -87,7 +93,7 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['rolling_mean_24h'] = df_agg['orders_count'].rolling(24, min_periods=1).mean()
     df_agg['rolling_std_24h'] = df_agg['orders_count'].rolling(24, min_periods=1).std()
     
-    # Погодные признаки
+    # Погодные признаки (если есть)
     weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']
     for col in weather_cols:
         if col in df_agg.columns:
@@ -131,27 +137,32 @@ def prepare_for_prediction(
     # Конвертируем orders_count в float
     df_combined['orders_count'] = df_combined['orders_count'].astype(float)
     
-    # Заполняем будущие часы средними по часу суток
+    # Заполняем будущие часы МЕДИАНОЙ по часу суток (меньше выбросов)
     future_mask = df_combined['datetime'] >= from_datetime
     
     hist_df_copy = hist_df.copy()
     hist_df_copy['hour'] = hist_df_copy['datetime'].dt.hour
-    hour_means = hist_df_copy.groupby('hour')['orders_count'].mean()
+    
+    # Используем медиану вместо среднего
+    hour_medians = hist_df_copy.groupby('hour')['orders_count'].median()
+    
+    # Ограничиваем максимум (не больше 50% от исторического максимума)
+    max_allowed = hist_df_copy['orders_count'].max() * 0.5
     
     df_combined.loc[future_mask, 'orders_count'] = df_combined.loc[
         future_mask, 'datetime'
-    ].dt.hour.map(hour_means)
+    ].dt.hour.map(hour_medians).clip(upper=max_allowed)
     
     df_combined = _generate_features(df_combined)
     
-    # Заполняем лаги средними
-    global_mean = hist_df['orders_count'].mean()
+    # Заполняем лаги медианой
+    global_median = hist_df['orders_count'].median()
     lag_cols = ['lag_orders_1h', 'lag_orders_24h', 'lag_orders_168h', 
                 'rolling_mean_3h', 'rolling_mean_24h', 'rolling_std_24h']
     
     for col in lag_cols:
         if col in df_combined.columns:
-            df_combined.loc[future_mask & (df_combined[col] == 0), col] = global_mean
+            df_combined.loc[future_mask & (df_combined[col] == 0), col] = global_median
     
     df_combined = df_combined.fillna(0)
     
@@ -164,6 +175,7 @@ def prepare_for_prediction(
     
     if verbose:
         print(f"Часов в прогнозе: {len(df_pred)}")
-        print(f"Среднее историческое заказов/час: {global_mean:.2f}")
+        print(f"Медиана историческая заказов/час: {global_median:.2f}")
+        print(f"Среднее в прогнозе (до модели): {df_pred['orders_count'].mean():.2f}")
     
     return df_pred, df_combined

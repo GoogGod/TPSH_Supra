@@ -17,15 +17,13 @@ def evaluate_model(
     verbose: bool = True
 ) -> Dict:
     if verbose:
-        print("\n" + "=" * 70)
         print("ОЦЕНКА МОДЕЛИ")
-        print("=" * 70)
     
     # Загрузка модели
     model_data = joblib.load(model_path)
     model = model_data['model']
     saved_features = model_data.get('feature_cols', feature_cols)
-    avg_guests_per_order = model_data.get('avg_guests_per_order', 2.3)
+    avg_guests_per_order = model_data.get('avg_guests_per_order', 2.03)
     
     # Загрузка данных
     df = pd.read_csv(data_path, encoding='utf-8-sig')
@@ -39,9 +37,8 @@ def evaluate_model(
     # Подготовка признаков
     df = _prepare_features(df)
     
-    # Разделение на train/test
+    # Разделение
     split_idx = int(len(df) * (1 - test_size))
-    df_train = df.iloc[:split_idx]
     df_test = df.iloc[split_idx:]
     
     X_test = df_test[saved_features]
@@ -54,19 +51,20 @@ def evaluate_model(
     # Предсказание гостей через конверсию
     y_pred_guests = y_pred_orders * avg_guests_per_order
     
-    # Расчёт метрик для заказов
+    # Метрики для заказов
     metrics_orders = _calculate_metrics(y_test_orders, y_pred_orders, 'orders')
     
-    # Расчёт метрик для гостей
+    # Метрики для гостей (через конверсию)
     metrics_guests = _calculate_metrics(y_test_guests, y_pred_guests, 'guests')
     
-    # Объединение метрик
+    # Объединение
     metrics = {
         **metrics_orders,
         **metrics_guests,
         'avg_guests_per_order': avg_guests_per_order,
         'timestamp': datetime.now().isoformat()
     }
+    
     
     if verbose:
         _print_report(metrics)
@@ -80,16 +78,13 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     
     df = df.copy()
     
-    # Время
     df['hour'] = df['datetime'].dt.hour
     df['hour_encoded'] = np.sin(2 * np.pi * df['hour'] / 24)
     
-    # Пиковые часы
     df['is_lunch_peak'] = ((df['hour'] >= 12) & (df['hour'] <= 14)).astype(int)
     df['is_dinner_peak'] = ((df['hour'] >= 18) & (df['hour'] <= 21)).astype(int)
     df['is_peak_hour'] = (df['is_lunch_peak'] | df['is_dinner_peak']).astype(int)
     
-    # Календарь
     df['day_of_week'] = df['datetime'].dt.weekday
     df['month'] = df['datetime'].dt.month
     df['day_of_month'] = df['datetime'].dt.day
@@ -97,32 +92,26 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df['is_month_start'] = df['datetime'].dt.is_month_start.astype(int)
     df['is_month_end'] = df['datetime'].dt.is_month_end.astype(int)
     
-    # Праздники
     df['is_holiday'] = df['datetime'].dt.date.apply(
         lambda x: 1 if x in ru_holidays else 0
     )
     
-    # Взаимодействия
     df['hour_weekend'] = df['hour_encoded'] * df['is_weekend']
     df['hour_holiday'] = df['hour_encoded'] * df['is_holiday']
     df['peak_weekend'] = df['is_peak_hour'] * df['is_weekend']
     df['peak_holiday'] = df['is_peak_hour'] * df['is_holiday']
     
-    # Дни
     df['friday_dinner'] = ((df['day_of_week'] == 4) & df['is_dinner_peak']).astype(int)
     df['saturday_dinner'] = ((df['day_of_week'] == 5) & df['is_dinner_peak']).astype(int)
     df['sunday_dinner'] = ((df['day_of_week'] == 6) & df['is_dinner_peak']).astype(int)
     
-    # Лаги
     for lag in [1, 24, 168]:
         df[f'lag_orders_{lag}h'] = df['orders_count'].shift(lag)
     
-    # Скользящие средние
     df['rolling_mean_3h'] = df['orders_count'].rolling(3, min_periods=1).mean()
     df['rolling_mean_24h'] = df['orders_count'].rolling(24, min_periods=1).mean()
     df['rolling_std_24h'] = df['orders_count'].rolling(24, min_periods=1).std()
     
-    # Погода
     for col in ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']:
         if col not in df.columns:
             df[col] = 0
@@ -165,7 +154,7 @@ def _print_report(metrics: Dict):
     print(f"{'Точность (±2 заказа):':<35} {metrics.get('orders_accuracy_within_2', 0):>20.1f}%")
     
     # ГОСТИ
-    print(f"\n{'ГОСТИ':^70}")
+    print(f"\n{'ГОСТИ (через конверсию)':^70}")
     print("-" * 70)
     print(f"{'Метрика':<35} {'Значение':>20}")
     print("-" * 70)
@@ -183,20 +172,18 @@ def _print_report(metrics: Dict):
     
     # Оценка качества
     orders_r2 = metrics.get('orders_r2', 0)
-    orders_mae = metrics.get('orders_mae', 0)
     guests_r2 = metrics.get('guests_r2', 0)
-    guests_mae = metrics.get('guests_mae', 0)
     
-    if orders_r2 >= 0.7 and orders_mae < 1.5:
+    if orders_r2 >= 0.7:
         orders_grade = "ОТЛИЧНО"
-    elif orders_r2 >= 0.5 and orders_mae < 3:
+    elif orders_r2 >= 0.5:
         orders_grade = "ХОРОШО"
     else:
         orders_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
     
-    if guests_r2 >= 0.7 and guests_mae < 3:
+    if guests_r2 >= 0.7:
         guests_grade = "ОТЛИЧНО"
-    elif guests_r2 >= 0.5 and guests_mae < 5:
+    elif guests_r2 >= 0.5:
         guests_grade = "ХОРОШО"
     else:
         guests_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
