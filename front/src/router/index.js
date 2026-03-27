@@ -4,7 +4,7 @@ import CabinetView from '../views/CabinetView.vue'
 
 const routes = [
   {
-    path: '/',
+    path: '/login',
     name: 'login',
     component: LoginView
   },
@@ -12,6 +12,10 @@ const routes = [
     path: '/cabinet',
     name: 'cabinet',
     component: CabinetView
+  },
+  {
+    path: '/',
+    redirect: '/login'
   }
 ]
 
