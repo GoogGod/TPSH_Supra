@@ -125,13 +125,21 @@ def main(
     
     # ИТОГИ
     print("\n" + "=" * 70)
-    print("ПИЙПЛАЙН ЗАВЕРШЁН")
+    print("ПАЙПЛАЙН ЗАВЕРШЁН")
     print("=" * 70)
     
     if metrics:
-        print(f"\nМетрики модели:")
-        print(f"   MAE (Test): {metrics.get('test_mae', 'N/A'):.2f}")
-        print(f"   R² (Test): {metrics.get('test_r2', 'N/A'):.3f}")
+        print(f"\nМЕТРИКИ МОДЕЛИ")
+        print(f"{'=' * 40}")
+        print(f"{'Метрика':<25} {'Значение':>15}")
+        print(f"{'=' * 40}")
+        print(f"{'MAE(test):':<25} {metrics.get('test_mae', 'N/A'):>15.2f}")
+        print(f"{'RMSE(test):':<25} {metrics.get('test_rmse', 'N/A'):>15.2f}")
+        print(f"{'R²(test):':<25} {metrics.get('test_r2', 'N/A'):>15.3f}")
+        print(f"{'MAE(train):':<25} {metrics.get('train_mae', 'N/A'):>15.2f}")
+        print(f"{'RMSE(train):':<25} {metrics.get('train_rmse', 'N/A'):>15.2f}")
+        print(f"{'R²(train):':<25} {metrics.get('train_r2', 'N/A'):>15.3f}")
+        print(f"{'=' * 40}")
     
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
@@ -150,7 +158,7 @@ if __name__ == '__main__':
     # main()
     main(
         process_data=False,
-        train_model=False,
+        train_model=True,
         from_date='2026-04-01',
         to_date='2026-05-01'
     )
