@@ -128,11 +128,35 @@ def _calculate_metrics(y_true: pd.Series, y_pred: pd.Series, prefix: str) -> Dic
     y_pred_rounded = np.maximum(0, np.round(y_pred)).astype(int)
     y_true_rounded = np.maximum(0, np.round(y_true)).astype(int)
     
+    # Базовые метрики
+    mae = float(mean_absolute_error(y_true_rounded, y_pred_rounded))
+    rmse = float(np.sqrt(mean_squared_error(y_true_rounded, y_pred_rounded)))
+    r2 = float(r2_score(y_true_rounded, y_pred_rounded))
+    
+    # MAPE (для расчёта общей точности)
+    mask = y_true_rounded > 0
+    if mask.sum() > 0:
+        mape = float(np.mean(np.abs((y_true_rounded[mask] - y_pred_rounded[mask]) / y_true_rounded[mask])) * 100)
+    else:
+        mape = 0.0
+    
+    # Новая метрика: общая точность в %
+    accuracy_percent = max(0, 100 - mape)
+    
+    # Новые метрики: точность в пределах X%
+    accuracy_within_10pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.10)
+    accuracy_within_20pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.20)
+    accuracy_within_30pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.30)
+    
     return {
-        f'{prefix}_mae': float(mean_absolute_error(y_true_rounded, y_pred_rounded)),
-        f'{prefix}_rmse': float(np.sqrt(mean_squared_error(y_true_rounded, y_pred_rounded))),
-        f'{prefix}_r2': float(r2_score(y_true_rounded, y_pred_rounded)),
-        f'{prefix}_mape': float(np.mean(np.abs((y_true_rounded - y_pred_rounded) / (y_true_rounded + 1))) * 100),
+        f'{prefix}_mae': mae,
+        f'{prefix}_rmse': rmse,
+        f'{prefix}_r2': r2,
+        f'{prefix}_mape': mape,
+        f'{prefix}_accuracy_percent': accuracy_percent,  # 🔥 Новая
+        f'{prefix}_accuracy_within_10pct': accuracy_within_10pct,  # 🔥 Новая
+        f'{prefix}_accuracy_within_20pct': accuracy_within_20pct,  # 🔥 Новая
+        f'{prefix}_accuracy_within_30pct': accuracy_within_30pct,  # 🔥 Новая
         f'{prefix}_accuracy_within_1': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 1) * 100),
         f'{prefix}_accuracy_within_2': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 2) * 100),
     }
@@ -144,31 +168,45 @@ def _print_report(metrics: Dict):
     # ЗАКАЗЫ
     print(f"\n{'ЗАКАЗЫ':^70}")
     print("-" * 70)
-    print(f"{'Метрика':<35} {'Значение':>20}")
+    print(f"{'Метрика':<40} {'Значение':>15}")
     print("-" * 70)
-    print(f"{'MAE (средняя ошибка):':<35} {metrics.get('orders_mae', 0):>20.2f}")
-    print(f"{'RMSE (квадратичная ошибка):':<35} {metrics.get('orders_rmse', 0):>20.2f}")
-    print(f"{'R² (коэф. детерминации):':<35} {metrics.get('orders_r2', 0):>20.3f}")
-    print(f"{'MAPE (средняя % ошибка):':<35} {metrics.get('orders_mape', 0):>20.1f}%")
-    print(f"{'Точность (±1 заказ):':<35} {metrics.get('orders_accuracy_within_1', 0):>20.1f}%")
-    print(f"{'Точность (±2 заказа):':<35} {metrics.get('orders_accuracy_within_2', 0):>20.1f}%")
+    print(f"{'MAE (средняя ошибка):':<40} {metrics.get('orders_mae', 0):>15.2f}")
+    print(f"{'RMSE (квадратичная ошибка):':<40} {metrics.get('orders_rmse', 0):>15.2f}")
+    print(f"{'R² (коэф. детерминации):':<40} {metrics.get('orders_r2', 0):>15.3f}")
+    print(f"{'MAPE (средняя % ошибка):':<40} {metrics.get('orders_mape', 0):>15.1f}%")
     
-    # ГОСТИ
+    # Новые метрики точности в %
+    print(f"\n{'ТОЧНОСТЬ В ПРОЦЕНТАХ:':<40}")
+    print(f"{'Общая точность (100% - MAPE):':<40} {metrics.get('orders_accuracy_percent', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±10%:':<40} {metrics.get('orders_accuracy_within_10pct', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±20%:':<40} {metrics.get('orders_accuracy_within_20pct', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±30%:':<40} {metrics.get('orders_accuracy_within_30pct', 0):>15.1f}%")
+    
+    print(f"\n{'Точность (±1 заказ):':<40} {metrics.get('orders_accuracy_within_1', 0):>15.1f}%")
+    print(f"{'Точность (±2 заказа):':<40} {metrics.get('orders_accuracy_within_2', 0):>15.1f}%")
+    
+    # ГОСТИ (аналогично)
     print(f"\n{'ГОСТИ (через конверсию)':^70}")
     print("-" * 70)
-    print(f"{'Метрика':<35} {'Значение':>20}")
+    print(f"{'Метрика':<40} {'Значение':>15}")
     print("-" * 70)
-    print(f"{'MAE (средняя ошибка):':<35} {metrics.get('guests_mae', 0):>20.2f}")
-    print(f"{'RMSE (квадратичная ошибка):':<35} {metrics.get('guests_rmse', 0):>20.2f}")
-    print(f"{'R² (коэф. детерминации):':<35} {metrics.get('guests_r2', 0):>20.3f}")
-    print(f"{'MAPE (средняя % ошибка):':<35} {metrics.get('guests_mape', 0):>20.1f}%")
-    print(f"{'Точность (±1 гость):':<35} {metrics.get('guests_accuracy_within_1', 0):>20.1f}%")
-    print(f"{'Точность (±2 гостя):':<35} {metrics.get('guests_accuracy_within_2', 0):>20.1f}%")
+    print(f"{'MAE (средняя ошибка):':<40} {metrics.get('guests_mae', 0):>15.2f}")
+    print(f"{'RMSE (квадратичная ошибка):':<40} {metrics.get('guests_rmse', 0):>15.2f}")
+    print(f"{'R² (коэф. детерминации):':<40} {metrics.get('guests_r2', 0):>15.3f}")
+    print(f"{'MAPE (средняя % ошибка):':<40} {metrics.get('guests_mape', 0):>15.1f}%")
+    
+    print(f"\n{'ТОЧНОСТЬ В ПРОЦЕНТАХ:':<40}")
+    print(f"{'Общая точность (100% - MAPE):':<40} {metrics.get('guests_accuracy_percent', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±10%:':<40} {metrics.get('guests_accuracy_within_10pct', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±20%:':<40} {metrics.get('guests_accuracy_within_20pct', 0):>15.1f}%")
+    print(f"{'Точность в пределах ±30%:':<40} {metrics.get('guests_accuracy_within_30pct', 0):>15.1f}%")
+    
+    print(f"\n{'Точность (±1 гость):':<40} {metrics.get('guests_accuracy_within_1', 0):>15.1f}%")
+    print(f"{'Точность (±2 гостя):':<40} {metrics.get('guests_accuracy_within_2', 0):>15.1f}%")
     
     # КОНВЕРСИЯ
     print(f"\n{'КОНВЕРСИЯ':^70}")
-    print("-" * 70)
-    print(f"{'Среднее гостей на заказ:':<35} {metrics.get('avg_guests_per_order', 0):>20.2f}")
+    print(f"{'Среднее гостей на заказ:':<40} {metrics.get('avg_guests_per_order', 0):>15.2f}")
     
     # Оценка качества
     orders_r2 = metrics.get('orders_r2', 0)
@@ -190,3 +228,18 @@ def _print_report(metrics: Dict):
     
     print(f"\nЗаказы: {orders_grade:^50}")
     print(f"Гости:  {guests_grade:^50}\n")
+    
+def _calculate_percentage_accuracy(y_true: pd.Series, y_pred: pd.Series, threshold: float) -> float:
+    # Избегаем деления на 0
+    mask = y_true > 0
+    
+    if mask.sum() == 0:
+        return 100.0
+    
+    # Относительная ошибка: |pred - true| / true
+    relative_error = np.abs(y_pred[mask] - y_true[mask]) / y_true[mask]
+    
+    # % прогнозов в пределах порога
+    accuracy = (relative_error <= threshold).mean() * 100
+    
+    return float(accuracy)

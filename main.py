@@ -136,27 +136,6 @@ def main(
     # ИТОГИ
     print("ПАЙПЛАЙН ЗАВЕРШЁН")
     
-    if metrics or eval_metrics:
-        m = eval_metrics if eval_metrics else metrics
-        
-        print(f"\nМЕТРИКИ МОДЕЛИ")
-                
-        # ЗАКАЗЫ
-        print(f"\n{'ЗАКАЗЫ':^70}")
-        print(f"{'MAE (Test):':<25} {m.get('test_mae', m.get('orders_mae', 'N/A')):>15.2f}")
-        print(f"{'RMSE (Test):':<25} {m.get('test_rmse', m.get('orders_rmse', 'N/A')):>15.2f}")
-        print(f"{'R² (Test):':<25} {m.get('test_r2', m.get('orders_r2', 'N/A')):>15.3f}")
-        
-        # ГОСТИ
-        print(f"\n{'ГОСТИ (через конверсию)':^70}")
-        print(f"{'MAE (Test):':<25} {m.get('guests_mae', 'N/A'):>15.2f}")
-        print(f"{'RMSE (Test):':<25} {m.get('guests_rmse', 'N/A'):>15.2f}")
-        print(f"{'R² (Test):':<25} {m.get('guests_r2', 'N/A'):>15.3f}")
-        
-        # КОНВЕРСИЯ
-        print(f"\n{'КОНВЕРСИЯ':^70}")
-        print(f"{'Среднее гостей на заказ:':<25} {m.get('avg_guests_per_order', 'N/A'):>15.2f}")
-    
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
     
@@ -176,5 +155,7 @@ if __name__ == '__main__':
         train_model=True,
         make_forecast=True,
         evaluate=True,
-        verbose=True
+        verbose=True,
+        from_date='2026-01-01',
+        to_date='2027-01-01'
     )
