@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+.env
+.env.*
+!.env.example
+.vscode
+.idea
