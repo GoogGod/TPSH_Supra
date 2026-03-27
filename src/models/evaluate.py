@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from typing import Dict, Optional
+from typing import Dict
 import json
 from pathlib import Path
 from datetime import datetime
@@ -17,12 +17,15 @@ def evaluate_model(
     verbose: bool = True
 ) -> Dict:
     if verbose:
+        print("\n" + "=" * 70)
         print("ОЦЕНКА МОДЕЛИ")
+        print("=" * 70)
     
     # Загрузка модели
     model_data = joblib.load(model_path)
     model = model_data['model']
     saved_features = model_data.get('feature_cols', feature_cols)
+    avg_guests_per_order = model_data.get('avg_guests_per_order', 2.3)
     
     # Загрузка данных
     df = pd.read_csv(data_path, encoding='utf-8-sig')
@@ -42,14 +45,28 @@ def evaluate_model(
     df_test = df.iloc[split_idx:]
     
     X_test = df_test[saved_features]
-    y_test = df_test[target_column]
+    y_test_orders = df_test['orders_count']
+    y_test_guests = df_test['guests_count']
     
-    # Предсказание
-    y_pred = model.predict(X_test)
+    # Предсказание заказов
+    y_pred_orders = model.predict(X_test)
     
-    # Расчёт метрик
-    metrics = _calculate_metrics(y_test, y_pred)
+    # Предсказание гостей через конверсию
+    y_pred_guests = y_pred_orders * avg_guests_per_order
     
+    # Расчёт метрик для заказов
+    metrics_orders = _calculate_metrics(y_test_orders, y_pred_orders, 'orders')
+    
+    # Расчёт метрик для гостей
+    metrics_guests = _calculate_metrics(y_test_guests, y_pred_guests, 'guests')
+    
+    # Объединение метрик
+    metrics = {
+        **metrics_orders,
+        **metrics_guests,
+        'avg_guests_per_order': avg_guests_per_order,
+        'timestamp': datetime.now().isoformat()
+    }
     
     if verbose:
         _print_report(metrics)
@@ -118,27 +135,71 @@ def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _calculate_metrics(y_true: pd.Series, y_pred: pd.Series) -> Dict:
+def _calculate_metrics(y_true: pd.Series, y_pred: pd.Series, prefix: str) -> Dict:
     y_pred_rounded = np.maximum(0, np.round(y_pred)).astype(int)
     y_true_rounded = np.maximum(0, np.round(y_true)).astype(int)
     
     return {
-        'test_mae': float(mean_absolute_error(y_true_rounded, y_pred_rounded)),
-        'test_rmse': float(np.sqrt(mean_squared_error(y_true_rounded, y_pred_rounded))),
-        'test_r2': float(r2_score(y_true_rounded, y_pred_rounded)),
-        'mape': float(np.mean(np.abs((y_true_rounded - y_pred_rounded) / (y_true_rounded + 1))) * 100),
-        'accuracy_within_1': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 1) * 100),
-        'accuracy_within_2': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 2) * 100),
-        'timestamp': datetime.now().isoformat()
+        f'{prefix}_mae': float(mean_absolute_error(y_true_rounded, y_pred_rounded)),
+        f'{prefix}_rmse': float(np.sqrt(mean_squared_error(y_true_rounded, y_pred_rounded))),
+        f'{prefix}_r2': float(r2_score(y_true_rounded, y_pred_rounded)),
+        f'{prefix}_mape': float(np.mean(np.abs((y_true_rounded - y_pred_rounded) / (y_true_rounded + 1))) * 100),
+        f'{prefix}_accuracy_within_1': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 1) * 100),
+        f'{prefix}_accuracy_within_2': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 2) * 100),
     }
+
 
 def _print_report(metrics: Dict):
     print(f"{'МЕТРИКИ МОДЕЛИ':^70}")
+    
+    # ЗАКАЗЫ
+    print(f"\n{'ЗАКАЗЫ':^70}")
+    print("-" * 70)
     print(f"{'Метрика':<35} {'Значение':>20}")
     print("-" * 70)
-    print(f"{'MAE (средняя ошибка):':<35} {metrics.get('test_mae', 0):>20.2f}")
-    print(f"{'RMSE (квадратичная ошибка):':<35} {metrics.get('test_rmse', 0):>20.2f}")
-    print(f"{'R² (коэф. детерминации):':<35} {metrics.get('test_r2', 0):>20.3f}")
-    print(f"{'MAPE (средняя % ошибка):':<35} {metrics.get('mape', 0):>20.1f}%")
-    print(f"{'Точность (±1 заказ):':<35} {metrics.get('accuracy_within_1', 0):>20.1f}%")
-    print(f"{'Точность (±2 заказа):':<35} {metrics.get('accuracy_within_2', 0):>20.1f}%")
+    print(f"{'MAE (средняя ошибка):':<35} {metrics.get('orders_mae', 0):>20.2f}")
+    print(f"{'RMSE (квадратичная ошибка):':<35} {metrics.get('orders_rmse', 0):>20.2f}")
+    print(f"{'R² (коэф. детерминации):':<35} {metrics.get('orders_r2', 0):>20.3f}")
+    print(f"{'MAPE (средняя % ошибка):':<35} {metrics.get('orders_mape', 0):>20.1f}%")
+    print(f"{'Точность (±1 заказ):':<35} {metrics.get('orders_accuracy_within_1', 0):>20.1f}%")
+    print(f"{'Точность (±2 заказа):':<35} {metrics.get('orders_accuracy_within_2', 0):>20.1f}%")
+    
+    # ГОСТИ
+    print(f"\n{'ГОСТИ':^70}")
+    print("-" * 70)
+    print(f"{'Метрика':<35} {'Значение':>20}")
+    print("-" * 70)
+    print(f"{'MAE (средняя ошибка):':<35} {metrics.get('guests_mae', 0):>20.2f}")
+    print(f"{'RMSE (квадратичная ошибка):':<35} {metrics.get('guests_rmse', 0):>20.2f}")
+    print(f"{'R² (коэф. детерминации):':<35} {metrics.get('guests_r2', 0):>20.3f}")
+    print(f"{'MAPE (средняя % ошибка):':<35} {metrics.get('guests_mape', 0):>20.1f}%")
+    print(f"{'Точность (±1 гость):':<35} {metrics.get('guests_accuracy_within_1', 0):>20.1f}%")
+    print(f"{'Точность (±2 гостя):':<35} {metrics.get('guests_accuracy_within_2', 0):>20.1f}%")
+    
+    # КОНВЕРСИЯ
+    print(f"\n{'КОНВЕРСИЯ':^70}")
+    print("-" * 70)
+    print(f"{'Среднее гостей на заказ:':<35} {metrics.get('avg_guests_per_order', 0):>20.2f}")
+    
+    # Оценка качества
+    orders_r2 = metrics.get('orders_r2', 0)
+    orders_mae = metrics.get('orders_mae', 0)
+    guests_r2 = metrics.get('guests_r2', 0)
+    guests_mae = metrics.get('guests_mae', 0)
+    
+    if orders_r2 >= 0.7 and orders_mae < 1.5:
+        orders_grade = "ОТЛИЧНО"
+    elif orders_r2 >= 0.5 and orders_mae < 3:
+        orders_grade = "ХОРОШО"
+    else:
+        orders_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
+    
+    if guests_r2 >= 0.7 and guests_mae < 3:
+        guests_grade = "ОТЛИЧНО"
+    elif guests_r2 >= 0.5 and guests_mae < 5:
+        guests_grade = "ХОРОШО"
+    else:
+        guests_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
+    
+    print(f"\nЗаказы: {orders_grade:^50}")
+    print(f"Гости:  {guests_grade:^50}\n")

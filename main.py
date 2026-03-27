@@ -127,9 +127,30 @@ def main(
     # ИТОГИ
     print("ПАЙПЛАЙН ЗАВЕРШЁН")
     
+    if metrics or eval_metrics:
+        m = eval_metrics if eval_metrics else metrics
+
+        print(f"\nМЕТРИКИ МОДЕЛИ")
+
+        # ЗАКАЗЫ
+        print(f"\n{'ЗАКАЗЫ':^70}")
+        print(f"{'MAE (Test):':<25} {m.get('test_mae', m.get('orders_mae', 'N/A')):>15.2f}")
+        print(f"{'RMSE (Test):':<25} {m.get('test_rmse', m.get('orders_rmse', 'N/A')):>15.2f}")
+        print(f"{'R² (Test):':<25} {m.get('test_r2', m.get('orders_r2', 'N/A')):>15.3f}")
+
+        # ГОСТИ
+        print(f"\n{'ГОСТИ':^70}")
+        print(f"{'MAE (Test):':<25} {m.get('guests_mae', 'N/A'):>15.2f}")
+        print(f"{'RMSE (Test):':<25} {m.get('guests_rmse', 'N/A'):>15.2f}")
+        print(f"{'R² (Test):':<25} {m.get('guests_r2', 'N/A'):>15.3f}")
+
+        # КОНВЕРСИЯ
+        print(f"\n{'КОНВЕРСИЯ':^70}")
+        print(f"{'Среднее гостей на заказ:':<25} {m.get('avg_guests_per_order', 'N/A'):>15.2f}")
+
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
-    
+
     if forecast is not None:
         print(f"\nПериод прогноза:")
         print(f"   С: {forecast['datetime'].min()}")
@@ -137,8 +158,7 @@ def main(
         print(f"   Всего часов: {len(forecast)}")
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
         print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
-        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
-    
+        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")  
 
 
 if __name__ == '__main__':

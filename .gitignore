@@ -1,0 +1,8 @@
+README.md
+Стек и Структура.md
+venv
+forecast.csv
+processed_orders.csv
+real_orders.xlsx
+waiter_staffing_model.pkl
+__pycache__
