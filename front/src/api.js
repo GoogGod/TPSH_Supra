@@ -1,16 +1,15 @@
-import axios from 'axios';
+import axios from 'axios'
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api/v1', // Базовый адрес твоего Django
-});
+  baseURL: 'http://localhost:8000/api/v1',
+})
 
-// Автоматически добавляем токен в заголовки, если он есть
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem('access') // было access_token
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    config.headers.Authorization = `Bearer ${token}`
   }
-  return config;
-});
+  return config
+})
 
-export default api;
+export default api

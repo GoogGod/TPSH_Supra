@@ -52,41 +52,111 @@ const password = ref('')
 const errorMessage = ref('')
 const loading = ref(false)
 
+// true = проверка без backend
+const USE_MOCK_AUTH = true
+
+// Мок-пользователи для проверки логики ролей без backend
+const mockUsers = [
+  {
+    username: 'manager',
+    password: '123456',
+    user: {
+      username: 'manager',
+      email: 'manager@mail.ru',
+      first_name: 'Иван',
+      last_name: 'Петров',
+      phone: '+79990001122',
+      role: 'MANAGER',
+      venue: 'Ресторан №1',
+      schedule_pattern: '5/2',
+      shift_duration: '12 часов'
+    }
+  },
+  {
+    username: 'waiter',
+    password: '123456',
+    user: {
+      username: 'waiter',
+      email: 'waiter@mail.ru',
+      first_name: 'Алексей',
+      last_name: 'Сидоров',
+      phone: '+79990003344',
+      role: 'WAITER',
+      venue: 'Ресторан №1',
+      schedule_pattern: '2/2',
+      shift_duration: '12 часов'
+    }
+  }
+]
+
+const handleMockLogin = async () => {
+  const foundUser = mockUsers.find(
+    item =>
+      item.username === username.value.trim() &&
+      item.password === password.value.trim()
+  )
+
+  if (!foundUser) {
+    throw new Error('Ошибка: Неверный логин или пароль')
+  }
+
+  // Сохраняем данные так, как будто пришли с backend
+  localStorage.setItem('access', 'mock_access_token')
+  localStorage.setItem('refresh', 'mock_refresh_token')
+  localStorage.setItem('isAuthenticated', 'true')
+  localStorage.setItem('user', JSON.stringify(foundUser.user))
+
+  await router.push('/cabinet')
+}
+
+const handleBackendLogin = async () => {
+  const response = await fetch('http://localhost:8000/api/v1/auth/login/', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: username.value,
+      password: password.value,
+    }),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(
+      data.detail ||
+      data.message ||
+      'Ошибка: Неверный логин или пароль'
+    )
+  }
+
+  if (!data.access || !data.refresh) {
+    throw new Error('Бэкенд не вернул access и refresh токены')
+  }
+
+  localStorage.setItem('access', data.access)
+  localStorage.setItem('refresh', data.refresh)
+  localStorage.setItem('isAuthenticated', 'true')
+
+  // Если backend возвращает user — сохраняем его
+  if (data.user) {
+    localStorage.setItem('user', JSON.stringify(data.user))
+  }
+
+  await router.push('/cabinet')
+}
+
 const handleLogin = async () => {
   errorMessage.value = ''
   loading.value = true
 
   try {
-    const response = await fetch('http://localhost:8000/api/v1/auth/login/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username: username.value,
-        password: password.value,
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(
-        data.detail ||
-        data.message ||
-        'Ошибка: Неверный логин или пароль'
-      )
+    if (USE_MOCK_AUTH) {
+      await handleMockLogin()
+    } else {
+      await handleBackendLogin()
     }
-
-    if (!data.access || !data.refresh) {
-      throw new Error('Бэкенд не вернул access и refresh токены')
-    }
-
-    localStorage.setItem('access', data.access)
-    localStorage.setItem('refresh', data.refresh)
-    localStorage.setItem('isAuthenticated', 'true')
-
-    router.push('/schedule')
   } catch (error) {
     errorMessage.value = error.message || 'Ошибка авторизации'
   } finally {
