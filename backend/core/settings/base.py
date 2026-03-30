@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     # Local Apps
     'users',
     'shifts',
+    'user_notifications'
 ]
 
 MIDDLEWARE = [
