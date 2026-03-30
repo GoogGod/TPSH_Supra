@@ -20,7 +20,6 @@ class UserAdmin(BaseUserAdmin):
         }),
         ("Supra — график", {
             "fields": ("schedule_pattern", "shift_duration"),
-            "description": "Определяет как scheduler формирует расписание для сотрудника.",
         }),
     )
 
@@ -33,3 +32,20 @@ class UserAdmin(BaseUserAdmin):
             ),
         }),
     )
+
+    # ── Быстрое действие: повысить до pro ──
+    actions = ["make_pro", "make_noob"]
+
+    @admin.action(description="Повысить до опытного (pro)")
+    def make_pro(self, request, queryset):
+        updated = queryset.filter(
+            role="employee_noob"
+        ).update(role="employee_pro")
+        self.message_user(request, f"Повышено: {updated}")
+
+    @admin.action(description="Понизить до стажёра (noob)")
+    def make_noob(self, request, queryset):
+        updated = queryset.filter(
+            role="employee_pro"
+        ).update(role="employee_noob")
+        self.message_user(request, f"Понижено: {updated}")
