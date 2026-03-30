@@ -67,6 +67,12 @@ FEATURE_COLS = [
     'rolling_mean_3h',
     'rolling_mean_24h',
     'rolling_std_24h',
+    'temperature_mean',
+    'precipitation',
+    'is_rainy',
+    'is_extreme_weather',
+    'rainy_peak',
+    'extreme_peak'
 ]
 
 TARGET_COLUMN = 'orders_count'
@@ -80,3 +86,6 @@ WORKING_HOUR_END = 23
 MIN_ORDERS_PER_HOUR = 1
 MIN_GUESTS_PER_HOUR = 1
 AVG_GUESTS_PER_ORDER = 2.03
+
+WEATHER_LATITUDE = 43.1056
+WEATHER_LONGITUDE = 131.8735

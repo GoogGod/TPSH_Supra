@@ -4,14 +4,17 @@ import joblib
 from typing import Optional, Union
 from datetime import datetime, timedelta
 import os
+from pathlib import Path
 from src.config import (
     MODEL_FILE, RAW_DATA_FILE,
     WORKING_HOUR_START, WORKING_HOUR_END,
     MIN_ORDERS_PER_HOUR, MIN_GUESTS_PER_HOUR,
-    AVG_GUESTS_PER_ORDER
+    AVG_GUESTS_PER_ORDER,
+    WEATHER_LATITUDE, WEATHER_LONGITUDE
 )
 from src.data.loader import load_raw_dataset
 from src.data.preprocessor import prepare_for_prediction, prepare_features
+from src.data.weather_parser import WeatherParser, merge_weather_with_orders
 
 
 def predict(
@@ -36,7 +39,7 @@ def predict(
     model = model_data['model']
     feature_cols = model_data['feature_cols']
     
-    # 🔥 Загружаем коэффициент конверсии из модели
+    # Загружаем коэффициент конверсии из модели
     avg_guests = model_data.get('avg_guests_per_order', AVG_GUESTS_PER_ORDER)
     
     if verbose:
@@ -78,6 +81,15 @@ def predict(
         feature_cols,
         verbose=verbose
     )
+    
+    # Загрузка погоды для периода прогноза
+    _add_weather_to_forecast(df_pred, from_datetime, to_datetime, verbose)
+    
+    # Проверка наличия всех признаков
+    missing_features = set(feature_cols) - set(df_pred.columns)
+    if missing_features:
+        for col in missing_features:
+            df_pred[col] = 0
     
     # ПРЕДСКАЗАНИЕ ЗАКАЗОВ
     X_pred = df_pred[feature_cols]
@@ -126,6 +138,80 @@ def predict(
                     'orders_predicted', 'orders_with_buffer',
                     'guests_predicted', 'guests_with_buffer',
                     'lag_orders_1h', 'lag_orders_24h', 'rolling_mean_24h']]
+
+
+def _add_weather_to_forecast(
+    df_pred: pd.DataFrame,
+    from_datetime: pd.Timestamp,
+    to_datetime: pd.Timestamp,
+    verbose: bool = True
+) -> None:
+    try:
+        if verbose:
+            print("Загрузка погоды для периода прогноза...")
+        
+        weather_parser = WeatherParser(
+            latitude=WEATHER_LATITUDE,
+            longitude=WEATHER_LONGITUDE
+        )
+        
+        forecast_start = from_datetime.strftime('%Y-%m-%d')
+        forecast_end = to_datetime.strftime('%Y-%m-%d')
+        
+        weather_forecast = weather_parser.get_weather_for_date_range(
+            start_date=forecast_start,
+            end_date=forecast_end,
+            verbose=False
+        )
+        
+        if weather_forecast is not None and len(weather_forecast) > 0:
+            weather_forecast = weather_forecast.copy()
+            weather_forecast['datetime'] = pd.to_datetime(weather_forecast['date']).dt.floor('h')
+            
+            df_pred.merge(
+                weather_forecast.drop(columns=['date'], errors='ignore'),
+                on='datetime',
+                how='left',
+                inplace=True
+            )
+            
+            weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']
+            for col in weather_cols:
+                if col in df_pred.columns and df_pred[col].isna().any():
+                    if df_pred[col].notna().any():
+                        df_pred[col] = df_pred[col].fillna(df_pred[col].median())
+                    else:
+                        df_pred[col] = 0
+            
+            if 'is_peak_hour' in df_pred.columns:
+                df_pred['rainy_peak'] = df_pred['is_rainy'] * df_pred['is_peak_hour']
+                df_pred['extreme_peak'] = df_pred['is_extreme_weather'] * df_pred['is_peak_hour']
+            
+            if verbose:
+                print(f"  Погода добавлена: {weather_forecast['date'].nunique()} дней")
+        else:
+            _add_zero_weather_columns(df_pred)
+            if verbose:
+                print("  Нет данных о погоде — использую нулевые значения")
+                
+    except ImportError:
+        _add_zero_weather_columns(df_pred)
+        if verbose:
+            print("  Модуль weather_parser не найден — пропускаю погоду")
+    except Exception as e:
+        _add_zero_weather_columns(df_pred)
+        if verbose:
+            print(f"  Ошибка при загрузке погоды: {type(e).__name__} — продолжаю без погоды")
+
+
+def _add_zero_weather_columns(df: pd.DataFrame) -> None:
+    weather_cols = [
+        'temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather',
+        'rainy_peak', 'extreme_peak'
+    ]
+    for col in weather_cols:
+        if col not in df.columns:
+            df[col] = 0
 
 
 def _clean_for_predict(df: pd.DataFrame) -> pd.DataFrame:

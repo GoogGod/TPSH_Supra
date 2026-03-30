@@ -29,36 +29,17 @@ def main(
     
     # Обработка сырых данных
     if process_data:
-        print("ОБРАБОТКА СЫРЫХ ДАННЫХ")
+        print("\nОБРАБОТКА СЫРЫХ ДАННЫХ")
         
-        excel_exists = Path(RAW_EXCEL_FILE).exists()
-        csv_exists = Path(RAW_DATA_FILE).exists()
-        
-        if not excel_exists:
-            print(f"Исходный файл не найден: {RAW_EXCEL_FILE}")
-            if not csv_exists:
-                raise FileNotFoundError("Нет ни исходного Excel, ни обработанного CSV!")
-            print("Используем существующий обработанный CSV")
-            process_data = False
-        elif csv_exists:
-            excel_mtime = os.path.getmtime(RAW_EXCEL_FILE)
-            csv_mtime = os.path.getmtime(RAW_DATA_FILE)
-            
-            if excel_mtime > csv_mtime:
-                print("Excel новее CSV — переобработка данных...")
-            else:
-                print("CSV актуален — пропускаем обработку")
-                process_data = False
-        
-        if process_data:
-            output_path, stats = process_raw_data(
-                input_file=RAW_EXCEL_FILE,
-                output_file=RAW_DATA_FILE,
-                verbose=verbose
-            )
+        output_path, stats = process_raw_data(
+            input_file=RAW_EXCEL_FILE,
+            output_file=RAW_DATA_FILE,
+            verbose=verbose,
+            force_reprocess=True
+        )
     
     # Загрузка и подготовка данных
-    print("ЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ")
+    print("\nЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ")
     
     data = load_raw_dataset(RAW_DATA_FILE)
     
@@ -67,7 +48,7 @@ def main(
     
     # Обучение модели
     if train_model:
-        print("ОБУЧЕНИЕ МОДЕЛИ")
+        print("\nОБУЧЕНИЕ МОДЕЛИ")
         
         model, metrics = train(
             df_agg=df_agg,
@@ -83,7 +64,7 @@ def main(
     
     # Оценка модели
     if evaluate and train_model:
-        print("ОЦЕНКА МОДЕЛИ")
+        print("\nОЦЕНКА МОДЕЛИ")
         
         eval_metrics = evaluate_model(
             model_path=str(MODEL_FILE),
@@ -101,7 +82,7 @@ def main(
     
     # Прогноз
     if make_forecast:
-        print("ПРОГНОЗ")
+        print("\nПРОГНОЗ")
         
         if from_date:
             print(f"Дата начала: {from_date}")
@@ -120,7 +101,7 @@ def main(
         )
         
         # Сохранение прогноза
-        print("СОХРАНЕНИЕ ПРОГНОЗА")
+        print("\nСОХРАНЕНИЕ ПРОГНОЗА")
         
         csv_path = save_forecast_to_csv(
             forecast,
@@ -134,7 +115,7 @@ def main(
         forecast = None
     
     # ИТОГИ
-    print("ПАЙПЛАЙН ЗАВЕРШЁН")
+    print("\nПАЙПЛАЙН ЗАВЕРШЁН")
     
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
@@ -147,7 +128,7 @@ def main(
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
         print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
         print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
-    
+
 
 if __name__ == '__main__':
     main(

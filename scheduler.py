@@ -594,7 +594,6 @@ def create_waiter_schedule(
 
 
 if __name__ == '__main__':
-    # Пример конфигурации: 4 специалиста, 6 новичков
     waiter_config = {
         1: 'specialist',
         2: 'specialist',

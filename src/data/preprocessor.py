@@ -46,6 +46,11 @@ def prepare_features(df: pd.DataFrame, verbose: bool = True) -> Tuple[pd.DataFra
         print(df_agg[TARGET_COLUMN].describe())
         print(f"\nСтатистика целевой переменной (гости):")
         print(df_agg['guests_count'].describe())
+        
+        if 'temperature_mean' in df_agg.columns:
+            print(f"\nСтатистика погоды:")
+            print(f"  Температура: {df_agg['temperature_mean'].mean():.1f}°")
+            print(f"  Осадки: {df_agg['precipitation'].mean():.2f} мм/день")
     
     return df_agg, FEATURE_COLS
 
@@ -97,13 +102,20 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     weather_cols = ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']
     for col in weather_cols:
         if col in df_agg.columns:
-            df_agg[col] = df_agg[col].fillna(df_agg[col].median() if df_agg[col].notna().any() else 0)
+            if df_agg[col].notna().any():
+                df_agg[col] = df_agg[col].fillna(df_agg[col].median())
+            else:
+                df_agg[col] = 0
         else:
             df_agg[col] = 0
     
     # Взаимодействия с погодой
-    df_agg['rainy_peak'] = df_agg.get('is_rainy', 0) * df_agg['is_peak_hour']
-    df_agg['extreme_peak'] = df_agg.get('is_extreme_weather', 0) * df_agg['is_peak_hour']
+    if 'is_peak_hour' in df_agg.columns:
+        df_agg['rainy_peak'] = df_agg['is_rainy'] * df_agg['is_peak_hour']
+        df_agg['extreme_peak'] = df_agg['is_extreme_weather'] * df_agg['is_peak_hour']
+    else:
+        df_agg['rainy_peak'] = 0
+        df_agg['extreme_peak'] = 0
     
     df_agg = df_agg.fillna(0)
     
