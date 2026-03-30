@@ -24,22 +24,22 @@ SHIFT_TYPES = {
     'full': {
         'name': 'Полная',
         'start': 10,
-        'end': 23,
-        'hours': 13,
+        'end': 22,    
+        'hours': 12,
         'code': 1
     },
     'morning': {
         'name': 'Утренняя',
         'start': 10,
         'end': 16,
-        'hours': 6,
+        'hours': 6,      
         'code': 2
     },
     'evening': {
         'name': 'Вечерняя',
         'start': 16,
-        'end': 23,
-        'hours': 7,
+        'end': 25,      
+        'hours': 9,
         'code': 3
     },
     'off': {
