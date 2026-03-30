@@ -315,18 +315,20 @@ class WaiterScheduler:
                 work_end = None
                 work_hours = 0
                 
+                # Словарь для быстрого доступа по коду смены
+                SHIFT_INFO = {
+                    1: {'name': 'Полная', 'start': 10, 'end': 22, 'hours': 12},
+                    2: {'name': 'Утренняя', 'start': 10, 'end': 16, 'hours': 6},
+                    3: {'name': 'Вечерняя', 'start': 16, 'end': 25, 'hours': 9},
+                }
+                
                 for s in [1, 2, 3]:
                     if solver.Value(shift[(w, d, s)]) == 1:
                         shift_type_code = s
-                        if s == 1:
-                            shift_name = 'Полная'
-                            work_start, work_end, work_hours = 10, 23, 13
-                        elif s == 2:
-                            shift_name = 'Утренняя'
-                            work_start, work_end, work_hours = 10, 16, 6
-                        elif s == 3:
-                            shift_name = 'Вечерняя'
-                            work_start, work_end, work_hours = 16, 23, 7
+                        shift_name = SHIFT_INFO[s]['name']
+                        work_start = SHIFT_INFO[s]['start']
+                        work_end = SHIFT_INFO[s]['end']
+                        work_hours = SHIFT_INFO[s]['hours']
                         break
                 
                 schedule_data.append({
@@ -502,7 +504,15 @@ class WaiterScheduler:
                 hours = row['work_hours']
                 
                 if row['shift_type_code'] > 0:
-                    time_str = f"{int(row['work_start'])}:00-{int(row['work_end'])}:00"
+                    start = int(row['work_start'])
+                    end = int(row['work_end'])
+                    
+                    # Обработка перехода через полночь
+                    if end > 24:
+                        end_display = end - 24
+                        time_str = f"{start}:00-{end_display}:00+1"
+                    else:
+                        time_str = f"{start}:00-{end}:00"
                 else:
                     time_str = '—'
                 
@@ -590,8 +600,7 @@ if __name__ == '__main__':
         2: 'specialist',
         3: 'specialist',
         4: 'novice',
-        5: 'novice',
-        6: 'novice'
+        5: 'novice'
     }
     
     schedule_df, stats = create_waiter_schedule(
