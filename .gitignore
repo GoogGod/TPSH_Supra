@@ -3,6 +3,7 @@ README.md
 venv
 forecast.csv
 processed_orders.csv
+waiter_schedule.csv
 real_orders.xlsx
 model_orders.pkl
 __pycache__
