@@ -54,7 +54,7 @@ const errorMessage = ref('')
 const loading = ref(false)
 
 // true = проверка без backend
-const USE_MOCK_AUTH = true
+const USE_MOCK_AUTH = false
 
 // Мок-пользователи для проверки логики ролей без backend
 const mockUsers = [
