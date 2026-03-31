@@ -1,9 +1,21 @@
 export const getAccessToken = () => localStorage.getItem('access')
 export const getRefreshToken = () => localStorage.getItem('refresh')
 
+export const isAuthenticated = () => !!getAccessToken()
+
 export const getCurrentUser = () => {
   const raw = localStorage.getItem('user')
-  return raw ? JSON.parse(raw) : null
+
+  if (!raw) {
+    return null
+  }
+
+  try {
+    return JSON.parse(raw)
+  } catch (error) {
+    localStorage.removeItem('user')
+    return null
+  }
 }
 
 export const getUserRole = () => {
@@ -53,10 +65,7 @@ export const fetchCurrentUser = async () => {
 }
 
 export const ensureAuth = async () => {
-  const access = getAccessToken()
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true'
-
-  if (!access || !isAuthenticated) {
+  if (!isAuthenticated()) {
     return false
   }
 

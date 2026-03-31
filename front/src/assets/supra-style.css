@@ -17,8 +17,15 @@ body {
   min-height: 100vh;
   background-color: #0c1d49;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: 'Open Sans', sans-serif;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
 }
 
 /* Фоновые горы */

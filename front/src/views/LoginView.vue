@@ -42,11 +42,12 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
 import { fetchCurrentUser } from '../services/auth'
 
 const router = useRouter()
+const route = useRoute()
 
 const username = ref('')
 const password = ref('')
@@ -57,6 +58,11 @@ const loading = ref(false)
 const USE_MOCK_AUTH = false
 
 // Мок-пользователи для проверки логики ролей без backend
+
+if (localStorage.getItem('access')) {
+  router.replace('/cabinet')
+}
+
 const mockUsers = [
   {
     username: 'manager',
@@ -101,13 +107,12 @@ const handleMockLogin = async () => {
     throw new Error('Ошибка: Неверный логин или пароль')
   }
 
-  // Сохраняем данные так, как будто пришли с backend
   localStorage.setItem('access', 'mock_access_token')
   localStorage.setItem('refresh', 'mock_refresh_token')
   localStorage.setItem('isAuthenticated', 'true')
   localStorage.setItem('user', JSON.stringify(foundUser.user))
 
-  await router.push('/cabinet')
+  await router.push(route.query.redirect || '/cabinet')
 }
 
 const handleBackendLogin = async () => {
@@ -147,7 +152,7 @@ const handleBackendLogin = async () => {
     localStorage.setItem('user', JSON.stringify(freshUser))
   }
 
-  await router.push('/cabinet')
+  await router.push(route.query.redirect || '/cabinet')
 }
 
 const handleLogin = async () => {

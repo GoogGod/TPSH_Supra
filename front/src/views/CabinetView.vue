@@ -51,7 +51,7 @@
           <p><strong>Фамилия:</strong> {{ user.last_name }}</p>
           <p><strong>Телефон:</strong> {{ user.phone }}</p>
           <p><strong>Роль:</strong> {{ roleRu }}</p>
-          <p><strong>Заведение:</strong> {{ user.venue }}</p>
+          <p><strong>Заведение:</strong> {{ user.venue_name }}</p>
           <p><strong>График:</strong> {{ user.schedule_pattern }}</p>
           <p><strong>Длительность смены:</strong> {{ user.shift_duration }}</p>
         </div>
