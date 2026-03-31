@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Tuple
+from datetime import datetime
 from src.config import DATA_RAW_DIR, DATA_PROC_DIR, WEATHER_LATITUDE, WEATHER_LONGITUDE
 from src.data.weather_parser import WeatherParser, merge_weather_with_orders
 
 
 def analyze_raw_data(file_path: str) -> dict:
-    df = pd.read_excel(file_path, header=1)
+    # Читаем без заголовков
+    df = pd.read_excel(file_path, header=None)
     
     stats = {
         'total_rows': len(df),
@@ -21,53 +23,43 @@ def analyze_raw_data(file_path: str) -> dict:
         'missing_columns': []
     }
     
-    required_cols = ['Время открытия', 'Номер чека', 'Заказов', 'Количество гостей']
-    for col in required_cols:
-        if col not in df.columns:
-            stats['missing_columns'].append(col)
+    if len(df) < 1:
+        stats['missing_columns'] = ['Нет данных в файле']
+        return stats
     
-    if 'Время открытия' in df.columns:
-        df['order_datetime'] = pd.to_datetime(df['Время открытия'], errors='coerce')
-        valid_dates = df['order_datetime'].notna().sum()
-        stats['date_range'] = {
-            'min': df['order_datetime'].min(),
-            'max': df['order_datetime'].max(),
-            'valid_count': valid_dates,
-            'total_count': len(df)
-        }
-        stats['unique_days'] = df['order_datetime'].dt.date.nunique()
+    # Проверяем первую строку на наличие итогов
+    first_row = df.iloc[0]
+    has_totals = False
     
-    if 'Заказов' in df.columns:
-        stats['orders_total'] = df['Заказов'].sum()
-        stats['orders_per_day'] = stats['orders_total'] / max(stats['unique_days'], 1)
+    for val in first_row:
+        val_str = str(val).replace(',', '').replace('.', '').strip()
+        if val_str.isdigit() and len(val_str) > 3:
+            has_totals = True
+            break
     
-    if 'Количество гостей' in df.columns:
-        stats['guests_total'] = df['Количество гостей'].sum()
-        if stats['orders_total'] > 0:
-            stats['guests_per_order'] = stats['guests_total'] / stats['orders_total']
+    if has_totals:
+        df = df.iloc[1:].reset_index(drop=True)
+        stats['total_rows'] = len(df)
     
-    if 'Время открытия' in df.columns:
-        df['hour'] = df['order_datetime'].dt.hour
-        stats['hours_distribution'] = df.groupby('hour')['Заказов'].sum().to_dict()
+    if len(df) < 1:
+        stats['missing_columns'] = ['Нет данных после пропуска итогов']
+        return stats
     
-    if 'Время открытия' in df.columns:
-        df['day_name'] = df['order_datetime'].dt.day_name()
-        stats['dow_distribution'] = df.groupby('day_name')['Заказов'].sum().to_dict()
+    # Проверяем вторую строку на заголовки
+    second_row = df.iloc[0]
+    has_headers = False
     
-    return stats
-
-
-def create_enhanced_dataset(
-    input_file: str,
-    output_file: str,
-    weather_df: pd.DataFrame = None,
-    verbose: bool = True
-) -> pd.DataFrame:
-    if verbose:
-        print("Загрузка данных...")
+    for val in second_row:
+        val_str = str(val)
+        if any(k in val_str for k in ['Отделение', 'Учет', 'Номер', 'Время', 'Заказ', 'Гость']):
+            has_headers = True
+            break
     
-    df = pd.read_excel(input_file, header=1)
+    if has_headers:
+        df.columns = df.iloc[0]
+        df = df[1:]
     
+    # Маппинг русских названий
     mapping = {
         'Отделение': 'department',
         'Учетный день': 'account_date',
@@ -79,7 +71,138 @@ def create_enhanced_dataset(
     }
     df = df.rename(columns=mapping)
     
-    df['order_datetime'] = pd.to_datetime(df['open_time'], errors='coerce')
+    # Если не получилось - позиционный маппинг
+    required_cols = ['open_time', 'check_number', 'orders_count', 'guests_count']
+    missing = [col for col in required_cols if col not in df.columns]
+    
+    if missing and len(df.columns) >= 7:
+        df.columns = ['department', 'account_date', 'check_number', 
+                      'open_time', 'close_time', 'orders_count', 'guests_count']
+    
+    for col in required_cols:
+        if col not in df.columns:
+            stats['missing_columns'].append(col)
+    
+    if 'open_time' in df.columns:
+        df['order_datetime'] = pd.to_datetime(df['open_time'], errors='coerce')
+        valid_dates = df['order_datetime'].notna().sum()
+        stats['date_range'] = {
+            'min': df['order_datetime'].min(),
+            'max': df['order_datetime'].max(),
+            'valid_count': valid_dates,
+            'total_count': len(df)
+        }
+        stats['unique_days'] = df['order_datetime'].dt.date.nunique()
+    
+    if 'orders_count' in df.columns:
+        df['orders_count'] = pd.to_numeric(df['orders_count'], errors='coerce')
+        stats['orders_total'] = df['orders_count'].sum()
+        stats['orders_per_day'] = stats['orders_total'] / max(stats['unique_days'], 1)
+    
+    if 'guests_count' in df.columns:
+        df['guests_count'] = pd.to_numeric(df['guests_count'], errors='coerce')
+        stats['guests_total'] = df['guests_count'].sum()
+        if stats['orders_total'] > 0:
+            stats['guests_per_order'] = stats['guests_total'] / stats['orders_total']
+    
+    return stats
+
+def create_enhanced_dataset(
+    input_file: str,
+    output_file: str,
+    weather_df: pd.DataFrame = None,
+    verbose: bool = True
+) -> pd.DataFrame:
+    if verbose:
+        print("Загрузка данных...")
+    
+    # Читаем без заголовков
+    df = pd.read_excel(input_file, header=None)
+    
+    if len(df) < 2:
+        raise ValueError("Файл пуст или содержит менее 2 строк")
+    
+    # Проверяем первую строку на наличие итогов (цифры в любых колонках)
+    first_row = df.iloc[0]
+    has_totals = False
+    
+    for val in first_row:
+        val_str = str(val).replace(',', '').replace('.', '').strip()
+        if val_str.isdigit() and len(val_str) > 3:
+            has_totals = True
+            break
+    
+    if has_totals:
+        # Первая строка - итоги, данные начинаются со строки 1
+        if verbose:
+            print("  Обнаружена строка итогов - пропускаем")
+        df = df.iloc[1:].reset_index(drop=True)
+    
+    if len(df) < 1:
+        raise ValueError("Нет данных после пропуска строки итогов")
+    
+    # Проверяем вторую строку - если это заголовки (русский текст), используем их
+    second_row = df.iloc[0]
+    has_headers = False
+    
+    for val in second_row:
+        val_str = str(val)
+        # Проверяем на русские заголовки
+        if any(k in val_str for k in ['Отделение', 'Учет', 'Номер', 'Время', 'Заказ', 'Гость']):
+            has_headers = True
+            break
+    
+    if has_headers:
+        # Вторая строка - заголовки, используем их
+        if verbose:
+            print("  Обнаружены заголовки - используем как названия колонок")
+        df.columns = df.iloc[0]
+        df = df[1:].reset_index(drop=True)
+    
+    if len(df) < 1:
+        raise ValueError("Нет данных после пропуска заголовков")
+    
+    # Маппинг русских названий на английские
+    mapping = {
+        'Отделение': 'department',
+        'Учетный день': 'account_date',
+        'Номер чека': 'check_number',
+        'Время открытия': 'open_time',
+        'Время закрытия': 'close_time',
+        'Заказов': 'orders_count',
+        'Количество гостей': 'guests_count'
+    }
+    df = df.rename(columns=mapping)
+    
+    # Если колонки всё ещё не те - пробуем позиционный маппинг
+    required = ['open_time', 'orders_count', 'guests_count']
+    missing = [col for col in required if col not in df.columns]
+    
+    if missing:
+        if verbose:
+            print("  Заголовки не распознаны - используем позиционный маппинг")
+        
+        if len(df.columns) >= 7:
+            df.columns = ['department', 'account_date', 'check_number', 
+                          'open_time', 'close_time', 'orders_count', 'guests_count'][:len(df.columns)]
+    
+    # Финальная проверка
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"Отсутствуют колонки: {missing}. Доступные: {list(df.columns)}")
+    
+    # Парсинг даты/времени
+    def parse_datetime(val):
+        if pd.isna(val):
+            return pd.NaT
+        for fmt in ['%m/%d/%Y %H:%M', '%d.%m.%Y %H:%M', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M']:
+            try:
+                return datetime.strptime(str(val).strip(), fmt)
+            except:
+                continue
+        return pd.to_datetime(val, errors='coerce')
+    
+    df['order_datetime'] = df['open_time'].apply(parse_datetime)
     df = df.dropna(subset=['order_datetime'])
     
     df['hour'] = df['order_datetime'].dt.hour
@@ -93,7 +216,7 @@ def create_enhanced_dataset(
     df_agg = df.groupby(df['order_datetime'].dt.floor('h')).agg(
         orders_count=('orders_count', 'sum'),
         guests_count=('guests_count', 'sum'),
-        checks_count=('check_number', 'count'),
+        checks_count=('check_number', 'count') if 'check_number' in df.columns else ('orders_count', 'count'),
         avg_guests_per_check=('guests_count', 'mean'),
     ).reset_index()
     

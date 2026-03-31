@@ -209,7 +209,7 @@ def main(
 if __name__ == '__main__':
     waiter_config = {
         1: 'specialist', 2: 'specialist', 3: 'specialist',
-        4: 'novice', 5: 'novice', 6: 'novice'
+        4: 'novice', 5: 'novice', 6: 'novice', 7: 'novice'
     }
     
     main(
@@ -218,9 +218,9 @@ if __name__ == '__main__':
         make_forecast=True,
         evaluate=True,
         make_schedule=True,
-        incremental_training=False,
+        incremental_training=True,
         model_type='xgboost',
-        num_waiters=6,
+        num_waiters=7,
         waiter_config=waiter_config,
         verbose=True,
         force_fresh_weather=True,
