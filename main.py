@@ -20,6 +20,10 @@ def main(
     train_model: bool = True,
     make_forecast: bool = True,
     evaluate: bool = True,
+    make_schedule: bool = True,
+    num_waiters: int = 10,
+    waiter_config: dict = None,
+    guests_per_waiter: int = 15,
     from_date: Optional[Union[str, datetime]] = None,
     to_date: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
@@ -81,6 +85,9 @@ def main(
         eval_metrics = {}
     
     # Прогноз
+    forecast = None
+    csv_path = None
+    
     if make_forecast:
         print("\nПРОГНОЗ")
         
@@ -111,8 +118,30 @@ def main(
         )
     else:
         print("\nПропускаем прогноз")
-        csv_path = None
-        forecast = None
+    
+    # Планирование смен официантов
+    if make_schedule and forecast is not None:
+        print("\nПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
+        
+        from scheduler import create_waiter_schedule
+        
+        # Конфигурация официантов по умолчанию
+        if waiter_config is None:
+            waiter_config = {
+                1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist',
+                5: 'novice', 6: 'novice', 7: 'novice', 8: 'novice', 9: 'novice', 10: 'novice'
+            }
+        
+        schedule_df, schedule_stats = create_waiter_schedule(
+            forecast_path=str(f'{DATA_PRED_DIR}/forecast.csv'),
+            waiter_config=waiter_config,
+            output_path=str(f'{DATA_PRED_DIR}/waiter_schedule.csv'),
+            verbose=verbose
+        )
+    else:
+        print("\nПропускаем планирование смен")
+        schedule_df = None
+        schedule_stats = {}
     
     # ИТОГИ
     print("\nПАЙПЛАЙН ЗАВЕРШЁН")
@@ -128,14 +157,31 @@ def main(
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
         print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
         print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
+    
+    if schedule_df is not None:
+        print(f"\nРасписание официантов:")
+        print(f"   Файл: {f'{DATA_PRED_DIR}/waiter_schedule.csv'}")
+        print(f"   Количество официантов: {num_waiters}")
+        print(f"   Всего смен: {schedule_stats.get('total_shifts', 0)}")
+        print(f"   Всего часов: {schedule_stats.get('total_hours', 0)}")
 
 
 if __name__ == '__main__':
+    # Конфигурация официантов
+    waiter_config = {
+        1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist',
+        5: 'novice', 6: 'novice', 7: 'novice', 8: 'novice', 9: 'novice', 10: 'novice'
+    }
+    
     main(
         process_data=True,
         train_model=True,
         make_forecast=True,
         evaluate=True,
+        make_schedule=True,
+        num_waiters=10,
+        waiter_config=waiter_config,
+        guests_per_waiter=15,
         verbose=True,
         from_date='2026-04-01',
         to_date='2026-05-01'
