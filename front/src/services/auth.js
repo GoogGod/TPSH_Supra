@@ -2,13 +2,13 @@ export const getAccessToken = () => localStorage.getItem('access')
 export const getRefreshToken = () => localStorage.getItem('refresh')
 
 export const getCurrentUser = () => {
-  const raw = localStorage.getItem('currentUser')
+  const raw = localStorage.getItem('user')
   return raw ? JSON.parse(raw) : null
 }
 
 export const getUserRole = () => {
   const user = getCurrentUser()
-  return String(user?.ROLE || '').toLowerCase()
+  return String(user?.role || user?.ROLE || '').toLowerCase()
 }
 
 export const setTokens = ({ access, refresh }) => {
@@ -18,19 +18,15 @@ export const setTokens = ({ access, refresh }) => {
 
 export const setCurrentUser = (user) => {
   if (!user) return
-  localStorage.setItem('currentUser', JSON.stringify(user))
+  localStorage.setItem('user', JSON.stringify(user))
   localStorage.setItem('isAuthenticated', 'true')
 }
 
 export const clearAuthData = () => {
   localStorage.removeItem('access')
   localStorage.removeItem('refresh')
-  localStorage.removeItem('currentUser')
+  localStorage.removeItem('user')
   localStorage.removeItem('isAuthenticated')
-}
-
-export const ensureAuth = async () => {
-  return true
 }
 
 export const fetchCurrentUser = async () => {
@@ -55,25 +51,26 @@ export const fetchCurrentUser = async () => {
 
   return await response.json()
 }
-// export const fetchCurrentUser = async () => {
-//   const access = getAccessToken()
 
-//   if (!access) {
-//     throw new Error('Нет access токена')
-//   }
+export const ensureAuth = async () => {
+  const access = getAccessToken()
+  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true'
 
-//   return {
-//     ID: 1,
-//     USERNAME: 'test_user',
-//     EMAIL: 'test@mail.com',
-//     FIRST_NAME: 'Иван',
-//     LAST_NAME: 'Иванов',
-//     PHONE: '+79990000000',
-//     ROLE: 'employee',
-//     VENUE: 1,
-//     VENUE_NAME: 'Ресторан №1',
-//     SCHEDULE_PATTERN: '2/2',
-//     SHIFT_DURATION: '12H',
-//     IS_ACTIVE: true
-//   }
-// }
+  if (!access || !isAuthenticated) {
+    return false
+  }
+
+  const savedUser = getCurrentUser()
+  if (savedUser) {
+    return true
+  }
+
+  try {
+    const user = await fetchCurrentUser()
+    setCurrentUser(user)
+    return true
+  } catch (error) {
+    clearAuthData()
+    return false
+  }
+}

@@ -44,6 +44,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import '../assets/supra-style.css'
+import { fetchCurrentUser } from '../services/auth'
 
 const router = useRouter()
 
@@ -139,9 +140,11 @@ const handleBackendLogin = async () => {
   localStorage.setItem('refresh', data.refresh)
   localStorage.setItem('isAuthenticated', 'true')
 
-  // Если backend возвращает user — сохраняем его
   if (data.user) {
     localStorage.setItem('user', JSON.stringify(data.user))
+  } else {
+    const freshUser = await fetchCurrentUser()
+    localStorage.setItem('user', JSON.stringify(freshUser))
   }
 
   await router.push('/cabinet')
