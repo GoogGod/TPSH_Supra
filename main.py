@@ -1,5 +1,5 @@
 from src.data.process_raw_data import process_raw_data
-from src.data.loader import load_raw_dataset
+from src.data.loader import load_raw_dataset, load_and_merge_new_data
 from src.data.preprocessor import prepare_features
 from src.models.train import train
 from src.models.predict import predict
@@ -7,7 +7,7 @@ from src.models.evaluate import evaluate_model
 from src.export import save_forecast_to_csv
 from src.config import (
     RAW_EXCEL_FILE, RAW_DATA_FILE,
-    MODEL_FILE, DATA_PRED_DIR, FEATURE_COLS
+    MODEL_FILE, DATA_PRED_DIR, FEATURE_COLS, DATA_RAW_NEW_DIR
 )
 from pathlib import Path
 from typing import Optional, Union
@@ -21,20 +21,20 @@ def main(
     make_forecast: bool = True,
     evaluate: bool = True,
     make_schedule: bool = True,
-    num_waiters: int = 10,
+    incremental_training: bool = False,
+    model_type: str = 'xgboost',
+    num_waiters: int = 6,
     waiter_config: dict = None,
-    guests_per_waiter: int = 15,
     from_date: Optional[Union[str, datetime]] = None,
     to_date: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
-    verbose: bool = True
+    verbose: bool = True,
+    force_fresh_weather: bool = True
 ):
     print("СИСТЕМА ПРОГНОЗИРОВАНИЯ ЗАКАЗОВ И ГОСТЕЙ")
     
     # Обработка сырых данных
-    if process_data:
-        print("\nОБРАБОТКА СЫРЫХ ДАННЫХ")
-        
+    if process_data:        
         output_path, stats = process_raw_data(
             input_file=RAW_EXCEL_FILE,
             output_file=RAW_DATA_FILE,
@@ -45,7 +45,32 @@ def main(
     # Загрузка и подготовка данных
     print("\nЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ")
     
-    data = load_raw_dataset(RAW_DATA_FILE)
+    # Проверка новых данных
+    new_dir = Path(DATA_RAW_NEW_DIR) if not isinstance(DATA_RAW_NEW_DIR, Path) else DATA_RAW_NEW_DIR
+    has_new_data = new_dir.exists() and list(new_dir.glob('*.xlsx'))
+    
+    if has_new_data:
+        print("\nОБНАРУЖЕНЫ НОВЫЕ ДАННЫЕ")
+        print(f"Папка: {new_dir}")
+        
+        data = load_and_merge_new_data(
+            processed_path=RAW_DATA_FILE,
+            new_data_folder=new_dir,
+            verbose=verbose
+        )
+        
+        # Переобрабатываем погоду для объединённых данных
+        if process_data:
+            print("\nОбновление погодных данных...")
+            process_raw_data(
+                input_file=RAW_EXCEL_FILE,
+                output_file=RAW_DATA_FILE,
+                verbose=verbose,
+                force_reprocess=True
+            )
+            data = load_raw_dataset(RAW_DATA_FILE)
+    else:
+        data = load_raw_dataset(RAW_DATA_FILE)
     
     print("\nПодготовка признаков...")
     df_agg, feature_cols = prepare_features(data, verbose=verbose)
@@ -54,22 +79,32 @@ def main(
     if train_model:
         print("\nОБУЧЕНИЕ МОДЕЛИ")
         
+        existing_model_path = None
+        if incremental_training and os.path.exists(MODEL_FILE):
+            existing_model_path = str(MODEL_FILE)
+            if verbose:
+                print(f"Найдена существующая модель: {existing_model_path}")
+                print(f"Режим: дообучение")
+        else:
+            if verbose:
+                print(f"Режим: полное обучение")
+        
         model, metrics = train(
             df_agg=df_agg,
             feature_cols=feature_cols,
-            model_type='random_forest',
+            model_type=model_type,
             test_size=0.2,
             model_path=str(MODEL_FILE),
-            verbose=verbose
+            verbose=verbose,
+            existing_model_path=existing_model_path,
+            incremental=incremental_training
         )
     else:
         print("\nПропускаем обучение модели")
         metrics = {}
     
     # Оценка модели
-    if evaluate and train_model:
-        print("\nОЦЕНКА МОДЕЛИ")
-        
+    if evaluate and train_model:        
         eval_metrics = evaluate_model(
             model_path=str(MODEL_FILE),
             data_path=str(RAW_DATA_FILE),
@@ -104,10 +139,10 @@ def main(
             from_datetime=from_date,
             to_datetime=to_date,
             hours_ahead=hours_ahead,
-            verbose=verbose
+            verbose=verbose,
+            force_fresh_weather=force_fresh_weather
         )
         
-        # Сохранение прогноза
         print("\nСОХРАНЕНИЕ ПРОГНОЗА")
         
         csv_path = save_forecast_to_csv(
@@ -119,23 +154,22 @@ def main(
     else:
         print("\nПропускаем прогноз")
     
-    # Планирование смен официантов
+    # Планирование смен
     if make_schedule and forecast is not None:
         print("\nПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
         
         from scheduler import create_waiter_schedule
         
-        # Конфигурация официантов по умолчанию
         if waiter_config is None:
             waiter_config = {
-                1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist',
-                5: 'novice', 6: 'novice', 7: 'novice', 8: 'novice', 9: 'novice', 10: 'novice'
+                1: 'specialist', 2: 'specialist', 3: 'specialist',
+                4: 'novice', 5: 'novice', 6: 'novice'
             }
         
         schedule_df, schedule_stats = create_waiter_schedule(
-            forecast_path=str(f'{DATA_PRED_DIR}/forecast.csv'),
+            forecast_path=f'{DATA_PRED_DIR}/forecast.csv',
             waiter_config=waiter_config,
-            output_path=str(f'{DATA_PRED_DIR}/waiter_schedule.csv'),
+            output_path=f'{DATA_PRED_DIR}/waiter_schedule.csv',
             verbose=verbose
         )
     else:
@@ -144,7 +178,7 @@ def main(
         schedule_stats = {}
     
     # ИТОГИ
-    print("\nПАЙПЛАЙН ЗАВЕРШЁН")
+    print("ПАЙПЛАЙН ЗАВЕРШЁН")
     
     if csv_path:
         print(f"\nПрогноз сохранён: {csv_path}")
@@ -156,21 +190,26 @@ def main(
         print(f"   Всего часов: {len(forecast)}")
         print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
         print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
-        print(f"   Среднее в час: {forecast['orders_predicted'].mean():.2f} заказов, {forecast['guests_predicted'].mean():.2f} гостей")
     
     if schedule_df is not None:
         print(f"\nРасписание официантов:")
-        print(f"   Файл: {f'{DATA_PRED_DIR}/waiter_schedule.csv'}")
+        print(f"   Файл: {DATA_PRED_DIR}/waiter_schedule.csv")
         print(f"   Количество официантов: {num_waiters}")
         print(f"   Всего смен: {schedule_stats.get('total_shifts', 0)}")
-        print(f"   Всего часов: {schedule_stats.get('total_hours', 0)}")
+    
+    if metrics:
+        print(f"\nМетрики модели:")
+        print(f"   Тип: {metrics.get('model_type', 'N/A')}")
+        print(f"   R² (Test): {metrics.get('test_r2', 0):.3f}")
+        print(f"   MAE (Test): {metrics.get('test_mae', 0):.2f}")
+        if 'training_date' in metrics:
+            print(f"   Дата обучения: {metrics['training_date']}")
 
 
 if __name__ == '__main__':
-    # Конфигурация официантов
     waiter_config = {
-        1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist',
-        5: 'novice', 6: 'novice', 7: 'novice', 8: 'novice', 9: 'novice', 10: 'novice'
+        1: 'specialist', 2: 'specialist', 3: 'specialist',
+        4: 'novice', 5: 'novice', 6: 'novice'
     }
     
     main(
@@ -179,10 +218,12 @@ if __name__ == '__main__':
         make_forecast=True,
         evaluate=True,
         make_schedule=True,
-        num_waiters=10,
+        incremental_training=False,
+        model_type='xgboost',
+        num_waiters=6,
         waiter_config=waiter_config,
-        guests_per_waiter=15,
         verbose=True,
+        force_fresh_weather=True,
         from_date='2026-04-01',
         to_date='2026-05-01'
     )

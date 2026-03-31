@@ -23,14 +23,15 @@ def predict(
     from_datetime: Optional[Union[str, datetime]] = None,
     to_datetime: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
-    verbose: bool = True
+    verbose: bool = True,
+    force_fresh_weather: bool = True
 ) -> pd.DataFrame:
     model_path = model_path or str(MODEL_FILE)
     raw_data_path = raw_data_path or str(RAW_DATA_FILE)
     
     if verbose:
         print("ПРОГНОЗ КОЛИЧЕСТВА ЗАКАЗОВ И ГОСТЕЙ")
-        print("Используется: 1 модель + конверсия гостей")
+        print("Используется: 1 модель + конверсия гостей + свежая погода")
     
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Модель не найдена: {model_path}")
@@ -39,15 +40,15 @@ def predict(
     model = model_data['model']
     feature_cols = model_data['feature_cols']
     
-    # Загружаем коэффициент конверсии из модели
     avg_guests = model_data.get('avg_guests_per_order', AVG_GUESTS_PER_ORDER)
     
     if verbose:
         print(f"Модель: {model_data['metrics']['model_type']}")
         print(f"Признаков: {len(feature_cols)}")
         print(f"Среднее гостей на заказ: {avg_guests:.2f}")
+        if 'training_date' in model_data.get('metrics', {}):
+            print(f"Дата обучения модели: {model_data['metrics']['training_date']}")
     
-    # Загрузка и подготовка истории
     df = load_raw_dataset(raw_data_path)
     df = _clean_for_predict(df)
     
@@ -57,7 +58,6 @@ def predict(
     if verbose:
         print(f"История: {hist_agg['datetime'].min()} — {last_hist_datetime}")
     
-    # Определение диапазона прогноза
     if from_datetime is None and to_datetime is None:
         from_datetime = last_hist_datetime + pd.Timedelta(hours=1)
         to_datetime = from_datetime + pd.Timedelta(hours=hours_ahead - 1)
@@ -73,7 +73,6 @@ def predict(
     if verbose:
         print(f"Прогноз: {from_datetime} — {to_datetime}")
     
-    # Подготовка данных для предсказания
     df_pred, _ = prepare_for_prediction(
         hist_agg,
         from_datetime,
@@ -82,28 +81,30 @@ def predict(
         verbose=verbose
     )
     
-    # Загрузка погоды для периода прогноза
-    _add_weather_to_forecast(df_pred, from_datetime, to_datetime, verbose)
+    _add_weather_to_forecast(
+        df_pred, 
+        from_datetime, 
+        to_datetime, 
+        verbose, 
+        force_fresh=force_fresh_weather
+    )
     
-    # Проверка наличия всех признаков
     missing_features = set(feature_cols) - set(df_pred.columns)
     if missing_features:
+        if verbose:
+            print(f"  Добавляю отсутствующие признаки: {missing_features}")
         for col in missing_features:
             df_pred[col] = 0
     
-    # ПРЕДСКАЗАНИЕ ЗАКАЗОВ
     X_pred = df_pred[feature_cols]
     predictions_orders = model.predict(X_pred)
     df_pred['orders_predicted'] = np.maximum(0, np.round(predictions_orders)).astype(int)
     
-    # ГОСТИ ЧЕРЕЗ КОНВЕРСИЮ (вместо отдельной модели)
     df_pred['guests_predicted'] = (df_pred['orders_predicted'] * avg_guests).round().astype(int)
     
-    # Буферы (+25%)
     df_pred['orders_with_buffer'] = (df_pred['orders_predicted'] * 1.25).astype(int)
     df_pred['guests_with_buffer'] = (df_pred['guests_predicted'] * 1.25).astype(int)
     
-    # ФИЛЬТР НОЧНЫХ ЧАСОВ (23:00-09:59)
     night_hours_mask = (df_pred['hour'] < WORKING_HOUR_START) | (df_pred['hour'] >= WORKING_HOUR_END)
     
     df_pred.loc[night_hours_mask, 'orders_predicted'] = 0
@@ -111,7 +112,6 @@ def predict(
     df_pred.loc[night_hours_mask, 'orders_with_buffer'] = 0
     df_pred.loc[night_hours_mask, 'guests_with_buffer'] = 0
     
-    # Минимальный порог в рабочие часы
     working_hours_mask = ~night_hours_mask
     
     df_pred.loc[working_hours_mask, 'orders_predicted'] = df_pred.loc[
@@ -144,11 +144,14 @@ def _add_weather_to_forecast(
     df_pred: pd.DataFrame,
     from_datetime: pd.Timestamp,
     to_datetime: pd.Timestamp,
-    verbose: bool = True
+    verbose: bool = True,
+    force_fresh: bool = True
 ) -> None:
     try:
         if verbose:
             print("Загрузка погоды для периода прогноза...")
+            if force_fresh:
+                print("  (свежий запрос, кэш игнорируется)")
         
         weather_parser = WeatherParser(
             latitude=WEATHER_LATITUDE,
@@ -161,7 +164,8 @@ def _add_weather_to_forecast(
         weather_forecast = weather_parser.get_weather_for_date_range(
             start_date=forecast_start,
             end_date=forecast_end,
-            verbose=False
+            verbose=False,
+            use_cache=not force_fresh
         )
         
         if weather_forecast is not None and len(weather_forecast) > 0:
@@ -270,7 +274,6 @@ def _print_forecast_report(df_pred: pd.DataFrame):
     print(f"{'Заказы:':<20} среднее {df_pred['orders_predicted'].mean():.2f}/час, всего {df_pred['orders_predicted'].sum()}")
     print(f"{'Гости:':<20}  среднее {df_pred['guests_predicted'].mean():.2f}/час, всего {df_pred['guests_predicted'].sum()}")
     
-    # Разделение на рабочие и ночные часы
     working_mask = (df_pred['hour'] >= WORKING_HOUR_START) & (df_pred['hour'] < WORKING_HOUR_END)
     night_mask = ~working_mask
     
@@ -282,7 +285,6 @@ def _print_forecast_report(df_pred: pd.DataFrame):
     print(f"   Заказы: {df_pred[night_mask]['orders_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['orders_predicted'].sum()}")
     print(f"   Гости:  {df_pred[night_mask]['guests_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['guests_predicted'].sum()}")
     
-    # Прогноз по дням
     print(f"\nПрогноз по дням:")
     df_pred['date'] = df_pred['datetime'].dt.date
     daily = df_pred.groupby('date')[['orders_predicted', 'guests_predicted']].sum()

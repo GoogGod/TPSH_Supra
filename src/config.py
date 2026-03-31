@@ -5,20 +5,26 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_RAW_DIR = f'{ROOT_DIR}/data/raw'
 DATA_PROC_DIR = f'{ROOT_DIR}/data/processed'
 DATA_PRED_DIR = f'{ROOT_DIR}/data/predicted'
+DATA_RAW_NEW_DIR = f'{ROOT_DIR}/data/raw_new'
 MODEL_DIR = f'{ROOT_DIR}/models'
 REPORTS_DIR = f'{ROOT_DIR}/reports'
 
-# Исходный Excel файл (сырые данные)
 RAW_EXCEL_FILE = f'{DATA_RAW_DIR}/real_orders.xlsx'
-
-# Обработанный CSV файл (готов для обучения)
 RAW_DATA_FILE = f'{DATA_PROC_DIR}/processed_orders.csv'
-
 MODEL_FILE = f'{MODEL_DIR}/model_orders.pkl'
-
 FORECAST_CSV_FILE = f'{DATA_PRED_DIR}/forecast.csv'
+RAW_NEW_EXCEL_FILE = f'{DATA_RAW_NEW_DIR}/new_orders.xlsx'
 
 MODEL_PARAMS = {
+    'xgboost': {
+        'n_estimators': 1000,
+        'max_depth': 6,
+        'learning_rate': 0.01,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'random_state': 42,
+        'n_jobs': -1
+    },
     'random_forest': {
         'n_estimators': 500,
         'max_depth': 15,
@@ -41,7 +47,6 @@ MODEL_PARAMS = {
         'random_state': 42
     }
 }
-
 FEATURE_COLS = [
     'hour_encoded',
     'is_peak_hour',
