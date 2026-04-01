@@ -21,9 +21,12 @@
           <button class="side-menu-item" @click="goToSchedule">
             Расписание
           </button>
+        </div>
+
+        <div class="side-menu-footer">
           <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
-  Выйти
-</button>
+            Выйти
+          </button>
         </div>
       </aside>
     </transition>
@@ -59,7 +62,7 @@
           <p><strong>Длительность смены:</strong> {{ user.shift_duration }}</p>
         </div>
 
-        <div v-if="isManager" class="manager-actions">
+        <div v-if="canCreateRoles" class="manager-actions">
           <button class="wide-button secondary" @click="openCreateRoleModal">
             Создать роль
           </button>
@@ -90,73 +93,134 @@
             <div class="form-grid">
               <label class="form-field">
                 <span>Username *</span>
-                <input v-model.trim="createRoleForm.username" type="text" required :disabled="isCreatingRole" />
+                <input
+                  v-model.trim="createRoleForm.username"
+                  type="text"
+                  placeholder="nickname"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Email *</span>
-                <input v-model.trim="createRoleForm.email" type="email" required :disabled="isCreatingRole" />
+                <input
+                  v-model.trim="createRoleForm.email"
+                  type="email"
+                  placeholder="bagbag@gmail.com"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Имя *</span>
-                <input v-model.trim="createRoleForm.first_name" type="text" required :disabled="isCreatingRole" />
+                <input
+                  v-model.trim="createRoleForm.first_name"
+                  type="text"
+                  placeholder="имя"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Фамилия *</span>
-                <input v-model.trim="createRoleForm.last_name" type="text" required :disabled="isCreatingRole" />
+                <input
+                  v-model.trim="createRoleForm.last_name"
+                  type="text"
+                  placeholder="фамилия"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Пароль *</span>
-                <input v-model="createRoleForm.password" type="password" minlength="8" required :disabled="isCreatingRole" />
+                <input
+                  v-model="createRoleForm.password"
+                  type="password"
+                  placeholder="********"
+                  minlength="8"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Подтверждение пароля *</span>
-                <input v-model="createRoleForm.password_confirmation" type="password" minlength="8" required :disabled="isCreatingRole" />
+                <input
+                  v-model="createRoleForm.password_confirmation"
+                  type="password"
+                  placeholder="********"
+                  minlength="8"
+                  required
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
                 <span>Телефон</span>
-                <input v-model.trim="createRoleForm.phone" type="tel" :disabled="isCreatingRole" />
+                <input
+                  v-model.trim="createRoleForm.phone"
+                  type="tel"
+                  placeholder="+79990007766"
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label class="form-field">
-                <span>Роль</span>
+                <span>Роль *</span>
                 <select v-model="createRoleForm.role" :disabled="isCreatingRole">
-                  <option value="EMPLOYEE">Официант / сотрудник</option>
+                  <option
+                    v-for="option in availableRoleOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
                 </select>
               </label>
 
-              <label class="form-field">
-                <span>Заведение (ID)</span>
-                <input v-model.number="createRoleForm.venue" type="number" min="1" :disabled="isCreatingRole" />
-              </label>
+<label class="form-field">
+  <span>Заведение</span>
+  <input
+    v-model.trim="createRoleForm.venue"
+    type="number"
+    min="1"
+    max="100"
+    placeholder="1"
+    :disabled="isCreatingRole"
+  />
+</label>
 
               <label class="form-field">
-                <span>График</span>
+                <span>График *</span>
                 <select v-model="createRoleForm.schedule_pattern" :disabled="isCreatingRole">
-                  <option value="4/2">4/2</option>
                   <option value="4/3">4/3</option>
+                  <option value="4/2">4/2</option>
                   <option value="3/2">3/2</option>
                   <option value="2/2">2/2</option>
                 </select>
               </label>
 
               <label class="form-field form-field-full">
-                <span>Длительность смены</span>
+                <span>Длительность смены *</span>
                 <select v-model="createRoleForm.shift_duration" :disabled="isCreatingRole">
-                  <option value="14H">14H</option>
                   <option value="8H">8H</option>
+                  <option value="14H">14H</option>
                   <option value="CUSTOM">CUSTOM</option>
                 </select>
               </label>
             </div>
 
             <div class="form-actions">
-              <button type="button" class="wide-button secondary" @click="closeCreateRoleModal" :disabled="isCreatingRole">
+              <button
+                type="button"
+                class="wide-button secondary"
+                @click="closeCreateRoleModal"
+                :disabled="isCreatingRole"
+              >
                 Отмена
               </button>
               <button type="submit" class="wide-button" :disabled="isCreatingRole">
@@ -184,7 +248,7 @@ const getDefaultCreateRoleForm = () => ({
   last_name: '',
   phone: '',
   role: 'EMPLOYEE',
-  venue: null,
+  venue: '',
   schedule_pattern: '4/2',
   shift_duration: '14H'
 })
@@ -225,6 +289,10 @@ export default {
     isManager() {
       return this.user.role === 'MANAGER' || this.user.role === 'manager'
     },
+    canCreateRoles() {
+    const role = String(this.user.role || '').toUpperCase()
+    return role === 'MANAGER' || role === 'ADMIN'
+    },
     roleRu() {
       const role = String(this.user.role || '').toUpperCase()
 
@@ -236,7 +304,27 @@ export default {
       }
 
       return roles[role] || this.user.role || 'Не указано'
-    }
+    },
+availableRoleOptions() {
+  const role = String(this.user.role || '').toUpperCase()
+
+  if (role === 'MANAGER') {
+    return [
+      { value: 'EMPLOYEE', label: 'Официант / сотрудник' }
+    ]
+  }
+
+  if (role === 'ADMIN') {
+    return [
+      { value: 'EMPLOYEE', label: 'Официант / сотрудник' },
+      { value: 'MANAGER', label: 'Менеджер' },
+      { value: 'ADMIN', label: 'Администратор' }
+    ]
+  }
+
+  return []
+}
+
   },
   async mounted() {
     try {
@@ -258,11 +346,6 @@ export default {
     }
   },
   methods: {
-    handleLogout() {
-  this.menuOpen = false
-  logoutUser()
-  this.$router.replace('/login')
-},
     openMenu() {
       this.menuOpen = true
     },
@@ -277,15 +360,27 @@ export default {
       this.menuOpen = false
       this.$router.push('/schedule')
     },
-    openCreateRoleModal() {
-      this.createRoleError = ''
-      this.createRoleSuccess = ''
-      this.createRoleForm = {
-        ...getDefaultCreateRoleForm(),
-        venue: typeof this.user.venue === 'number' ? this.user.venue : null
-      }
-      this.showCreateRoleModal = true
+    handleLogout() {
+      this.menuOpen = false
+      logoutUser()
+      this.$router.replace('/login')
     },
+openCreateRoleModal() {
+  this.createRoleError = ''
+  this.createRoleSuccess = ''
+  this.createRoleForm = {
+    ...getDefaultCreateRoleForm(),
+    venue: this.user.venue ? String(this.user.venue) : ''
+  }
+
+  const role = String(this.user.role || '').toUpperCase()
+
+  if (role === 'MANAGER') {
+    this.createRoleForm.role = 'EMPLOYEE'
+  }
+
+  this.showCreateRoleModal = true
+},
     closeCreateRoleModal() {
       if (this.isCreatingRole) {
         return
@@ -309,7 +404,7 @@ export default {
         shift_duration: this.createRoleForm.shift_duration || '14H'
       }
 
-      if (this.createRoleForm.venue) {
+      if (this.createRoleForm.venue !== '' && this.createRoleForm.venue !== null) {
         payload.venue = Number(this.createRoleForm.venue)
       }
 

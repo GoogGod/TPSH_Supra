@@ -55,7 +55,7 @@ const errorMessage = ref('')
 const loading = ref(false)
 
 // true = проверка без backend
-const USE_MOCK_AUTH = true
+const USE_MOCK_AUTH = false
 
 // Мок-пользователи для проверки логики ролей без backend
 
@@ -89,6 +89,20 @@ const mockUsers = [
       last_name: 'Сидоров',
       phone: '+79990003344',
       role: 'WAITER',
+      venue: 'Ресторан №1',
+      schedule_pattern: '2/2',
+      shift_duration: '12 часов'
+    }
+  },  {
+    username: 'admin',
+    password: '123456',
+    user: {
+      username: 'admin',
+      email: 'admin@mail.ru',
+      first_name: 'Алексей',
+      last_name: 'Сидоров',
+      phone: '+79990003344',
+      role: 'ADMIN',
       venue: 'Ресторан №1',
       schedule_pattern: '2/2',
       shift_duration: '12 часов'

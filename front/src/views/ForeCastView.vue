@@ -21,6 +21,9 @@
   <button class="side-menu-item active" @click="closeMenu">
     Расписание
   </button>
+</div>
+
+<div class="side-menu-footer">
   <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
     Выйти
   </button>
@@ -43,17 +46,18 @@
           </div>
         </div>
 
-        <div v-if="showCreateScheduleButton" class="manager-empty-state">
-          <div>
-            <p class="empty-state-title">Расписание пока не создано</p>
-            <p class="empty-state-text">
-              Кнопка отображается только у менеджера и только когда в системе нет расписания.
-            </p>
-          </div>
-          <button class="create-schedule-button" @click="handleCreateSchedule">
-            Создать расписание
-          </button>
-        </div>
+<div v-if="canManageSchedule" class="manager-empty-state">
+  <div>
+    <p class="empty-state-title">Расписание пока не создано</p>
+  </div>
+  <button class="create-schedule-button" @click="handleCreateSchedule">
+    Создать расписание
+  </button>
+</div>
+
+<div v-else-if="showWaiterEmptyState" class="waiter-empty-state">
+  <p class="empty-state-title">Расписание на текущий месяц ещё не создано</p>
+</div>
 
         <template v-if="hasSchedule">
           <div class="month-switcher">
@@ -160,6 +164,7 @@
           </div>
         </template>
       </section>
+
     </main>
   </div>
 </template>
@@ -203,12 +208,22 @@ data() {
     isManager() {
       return ['MANAGER', 'manager'].includes(this.user.role)
     },
+      isAdmin() {
+    return String(this.user.role || '').toUpperCase() === 'ADMIN'
+  },
+  canManageSchedule() {
+    const role = String(this.user.role || '').toUpperCase()
+    return role === 'MANAGER' || role === 'ADMIN'
+  },
     hasSchedule() {
       return this.workingSchedule.length > 0
     },
     showCreateScheduleButton() {
       return this.isManager && !this.hasSchedule
     },
+    showWaiterEmptyState() {
+  return !this.isManager && !this.hasSchedule
+},
     workingSchedule() {
       return this.scheduleRaw.filter(item => item.is_working === true)
     },

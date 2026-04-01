@@ -195,6 +195,11 @@
   flex-direction: column;
 }
 
+.side-menu-footer {
+  margin-top: auto;
+  padding-top: 16px;
+}
+
 .side-menu-top {
   display: flex;
   justify-content: flex-start;
@@ -486,4 +491,21 @@
   .modal-card {
     padding: 16px;
   }
+}
+.form-field select option {
+  color: #0f173d;
+  background: #ffffff;
+}
+.form-field input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.form-field input[type='number']::-webkit-outer-spin-button,
+.form-field input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.form-field input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
