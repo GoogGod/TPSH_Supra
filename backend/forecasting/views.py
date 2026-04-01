@@ -25,15 +25,75 @@ from .services.schedule_generator import (
 )
 from shifts.models import Venue
 from shifts.serializers import MonthlyScheduleDetailSerializer
-from users.permissions import IsManager
+from users.permissions import IsManager, IsAdmin
+
+import calendar
+from datetime import date
+
+from django.db.models import Count, Q
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.generics import ListAPIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from drf_spectacular.utils import extend_schema
+
+from .models import Venue, MonthlySchedule, WaiterSlot
+from .serializers import (
+    VenueSerializer,
+    MonthlyScheduleListSerializer,
+    MonthlyScheduleDetailSerializer,
+    WaiterSlotDetailSerializer,
+)
+from .services.csv_parser import parse_schedule_csv, CSVParseError
+from users.permissions import IsManager, IsEmployee, IsOnlyEmployee
+
+from user_notifications.services import (
+    notify_schedule_published,
+    notify_slot_claimed,
+    notify_manual_assignment,
+    notify_assignment_response,
+)
 
 
 class RunForecastView(APIView):
     """
-    Запустить ML-пайплайн: обработка данных → обучение → прогноз.
-    После завершения загружает результаты из CSV в БД.
+    Запустить ML-пайплайн.
+
+    ADMIN: может всё (process_data, train_model, make_forecast, evaluate).
+    MANAGER: может только make_forecast (использует существующую модель).
     """
     permission_classes = [IsAuthenticated, IsManager]
+
+    def post(self, request):
+        serializer = ForecastRunCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = request.user
+
+        # ── Менеджер не может тренировать модель ──
+        if user.role == "manager":
+            if data.get("process_data", False):
+                return Response(
+                    {"detail": "Обработка данных доступна только администратору."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if data.get("train_model", False):
+                return Response(
+                    {"detail": "Обучение модели доступно только администратору."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if data.get("evaluate", False):
+                return Response(
+                    {"detail": "Оценка модели доступна только администратору."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Принудительно выключить
+            data["process_data"] = False
+            data["train_model"] = False
+            data["evaluate"] = False
 
     @extend_schema(
         request=ForecastRunCreateSerializer,
@@ -47,76 +107,54 @@ class RunForecastView(APIView):
         data = serializer.validated_data
 
         try:
-            venue = Venue.objects.get(
-                id=data["venue"], is_active=True
-            )
+            venue = Venue.objects.get(id=data["venue"], is_active=True)
         except Venue.DoesNotExist:
-            return Response(
-                {"detail": "Объект не найден."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"detail": "Объект не найден."}, status=404)
 
-        # Создать запись
         run = ForecastRun.objects.create(
             venue=venue,
-            triggered_by=request.user,
-            process_data=data.get("process_data", True),
-            train_model=data.get("train_model", True),
+            triggered_by=user,
+            process_data=data.get("process_data", False),
+            train_model=data.get("train_model", False),
             make_forecast=data.get("make_forecast", True),
-            evaluate=data.get("evaluate", True),
+            evaluate=data.get("evaluate", False),
             forecast_from=data.get("forecast_from"),
             forecast_to=data.get("forecast_to"),
             hours_ahead=data.get("hours_ahead", 720),
         )
 
-        # Запустить пайплайн
         try:
             runner = MLRunner(run)
             runner.execute()
 
-            # Загрузить прогнозы в БД
             if run.make_forecast:
                 try:
-                    count = load_forecast_to_db(run)
-                    run.error_message = ""
-                    run.save(update_fields=["error_message"])
+                    load_forecast_to_db(run)
                 except ForecastLoadError as e:
                     run.error_message = f"Пайплайн OK, но загрузка прогноза: {e}"
                     run.save(update_fields=["error_message"])
-
-        except Exception as e:
-            # Статус уже FAILED, ошибка записана в run
+        except Exception:
             pass
 
         response_serializer = ForecastRunSerializer(run)
-        return Response(
-            response_serializer.data,
-            status=status.HTTP_201_CREATED,
-        )
-
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 class ForecastRunListView(ListAPIView):
-    """Список запусков ML-пайплайна."""
+    """История запусков ML. ТОЛЬКО ADMIN."""
     serializer_class = ForecastRunSerializer
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsAdmin]
 
     def get_queryset(self):
         qs = ForecastRun.objects.select_related("venue", "triggered_by")
-
-        user = self.request.user
-        if user.is_manager and not user.is_admin_role:
-            qs = qs.filter(venue=user.venue)
-
         venue_id = self.request.query_params.get("venue")
         if venue_id:
             qs = qs.filter(venue_id=venue_id)
-
         return qs
 
 
 class ForecastRunDetailView(APIView):
     """Детали одного запуска + метрики."""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsAdmin] 
 
     def get(self, request, pk):
         try:
@@ -234,7 +272,7 @@ class DailyForecastView(APIView):
 
 class ModelAccuracyView(APIView):
     """Метрики точности последней обученной модели."""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsAdmin]
 
     def get(self, request):
         venue = request.query_params.get("venue")
@@ -270,11 +308,10 @@ class ModelAccuracyView(APIView):
 
 class GenerateScheduleView(APIView):
     """
-    Генерация расписания из прогноза.
-    1. Вызывает scheduler.py → waiter_schedule.csv
-    2. Парсит CSV → MonthlySchedule (draft)
+    DEPRECATED: Используйте POST /schedule/generate/ вместо этого.
+    Оставлено для обратной совместимости. ТОЛЬКО ADMIN.
     """
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsAdmin]
 
     @extend_schema(
         request=GenerateScheduleSerializer,
@@ -324,7 +361,7 @@ class GenerateScheduleView(APIView):
 
 class UploadRawDataView(APIView):
     """Загрузить сырые данные (Excel или CSV) для обучения модели."""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated, IsAdmin]
 
     def post(self, request):
         uploaded_file = request.FILES.get("file")

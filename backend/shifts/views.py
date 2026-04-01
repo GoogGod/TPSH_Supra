@@ -16,6 +16,7 @@ from .serializers import (
 )
 from .services.csv_parser import parse_schedule_csv, CSVParseError
 from users.permissions import IsManager, IsEmployee
+from datetime import date
 
 from user_notifications.services import (
     notify_schedule_published,
@@ -93,7 +94,12 @@ class UploadScheduleView(APIView):
 # ═══════════ Список / Детали расписания ═══════════
 
 class MonthlyScheduleListView(ListAPIView):
-    """Список расписаний. Менеджер — своё venue. Сотрудник — только published."""
+    """
+    Список расписаний.
+    Employee: только published своего venue.
+    Manager: всё своего venue.
+    Admin: всё.
+    """
     serializer_class = MonthlyScheduleListSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = None
@@ -102,14 +108,14 @@ class MonthlyScheduleListView(ListAPIView):
         user = self.request.user
         qs = MonthlySchedule.objects.select_related("venue")
 
-        # Сотрудник видит только опубликованные своего venue
         if user.is_employee:
+            if not user.venue:
+                return MonthlySchedule.objects.none()
             qs = qs.filter(venue=user.venue, status="published")
         elif user.is_manager:
             qs = qs.filter(venue=user.venue)
         # admin видит всё
 
-        # Аннотации для total_slots / filled_slots
         qs = qs.annotate(
             total_slots=Count("slots"),
             filled_slots=Count("slots", filter=Q(
@@ -117,7 +123,6 @@ class MonthlyScheduleListView(ListAPIView):
             )),
         )
 
-        # Фильтры из query params
         year = self.request.query_params.get("year")
         month = self.request.query_params.get("month")
         if year:
@@ -127,6 +132,65 @@ class MonthlyScheduleListView(ListAPIView):
 
         return qs
 
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+
+        # Для employee: если список пуст, вернуть подсказку
+        if request.user.is_employee and not response.data.get("results", response.data):
+            return Response({
+                "results": [],
+                "message": "Опубликованных расписаний пока нет. Пожалуйста, подождите.",
+            })
+
+        return response
+
+
+class MonthlyScheduleDetailView(APIView):
+    """Детали расписания."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            schedule = MonthlySchedule.objects.prefetch_related(
+                "slots__entries",
+                "slots__assigned_employee",
+            ).select_related("venue").get(pk=pk)
+        except MonthlySchedule.DoesNotExist:
+            return Response({"detail": "Не найдено."}, status=404)
+
+        user = request.user
+
+        # Employee видит только published своего venue
+        if user.is_employee:
+            if schedule.status != "published":
+                return Response({
+                    "detail": "Расписание ещё не опубликовано. Подождите.",
+                    "exists": False,
+                }, status=status.HTTP_404_NOT_FOUND)
+            if schedule.venue != user.venue:
+                return Response({"detail": "Не найдено."}, status=404)
+
+        # Manager видит только своё venue
+        if user.is_manager and not user.is_admin_role:
+            if schedule.venue != user.venue:
+                return Response({"detail": "Не найдено."}, status=404)
+
+        serializer = MonthlyScheduleDetailSerializer(schedule)
+
+        # Для employee: добавить инфо о его слоте
+        data = serializer.data
+        if user.is_employee:
+            my_slot = schedule.slots.filter(
+                assigned_employee=user,
+                assignment_status__in=["pending", "confirmed"],
+            ).first()
+            data["my_slot"] = {
+                "slot_id": my_slot.id,
+                "waiter_num": my_slot.waiter_num,
+                "status": my_slot.assignment_status,
+            } if my_slot else None
+
+        return Response(data)
 
 class MonthlyScheduleDetailView(APIView):
     """Детали расписания: все слоты + все записи."""
@@ -363,3 +427,271 @@ class UnassignSlotView(APIView):
         slot.save()
 
         return Response({"detail": "Сотрудник снят с позиции."})
+
+class ScheduleStatusView(APIView):
+    """
+    Проверить статус расписания на месяц.
+
+    Для каждой роли — свой ответ:
+    - Manager: {exists, status, can_generate, schedule_id, slots_total, slots_filled}
+    - Employee: {exists, published, schedule_id, message} или {exists: false, message: "Подождите"}
+    - Admin: как Manager
+
+    Query params: ?venue=1&year=2026&month=4
+    Если year/month не указаны — берётся следующий месяц.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        venue_id = request.query_params.get("venue")
+        year = request.query_params.get("year")
+        month = request.query_params.get("month")
+
+        # Определить venue
+        if venue_id:
+            try:
+                venue = Venue.objects.get(id=venue_id, is_active=True)
+            except Venue.DoesNotExist:
+                return Response({"detail": "Объект не найден."}, status=404)
+        elif user.venue:
+            venue = user.venue
+        else:
+            return Response(
+                {"detail": "Укажите venue или привяжите пользователя к объекту."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Определить год/месяц (по умолчанию — следующий месяц)
+        if year and month:
+            year = int(year)
+            month = int(month)
+        else:
+            today = date.today()
+            if today.month == 12:
+                year, month = today.year + 1, 1
+            else:
+                year, month = today.year, today.month + 1
+
+        # Найти расписание
+        schedule = MonthlySchedule.objects.filter(
+            venue=venue, year=year, month=month
+        ).first()
+
+        # ── Employee ──
+        if user.is_employee:
+            if schedule and schedule.status == "published":
+                total = schedule.slots.count()
+                filled = schedule.slots.exclude(assignment_status="open").count()
+                open_slots = schedule.slots.filter(assignment_status="open").count()
+
+                # Проверить занял ли сотрудник позицию
+                my_slot = schedule.slots.filter(
+                    assigned_employee=user,
+                    assignment_status__in=["pending", "confirmed"],
+                ).first()
+
+                return Response({
+                    "exists": True,
+                    "published": True,
+                    "schedule_id": schedule.id,
+                    "year": year,
+                    "month": month,
+                    "venue_name": venue.name,
+                    "slots_total": total,
+                    "slots_filled": filled,
+                    "slots_open": open_slots,
+                    "my_slot": {
+                        "slot_id": my_slot.id,
+                        "waiter_num": my_slot.waiter_num,
+                        "status": my_slot.assignment_status,
+                    } if my_slot else None,
+                })
+            else:
+                return Response({
+                    "exists": False,
+                    "published": False,
+                    "year": year,
+                    "month": month,
+                    "venue_name": venue.name,
+                    "message": f"Расписание на {month:02d}/{year} ещё не готово. Пожалуйста, подождите.",
+                })
+
+        # ── Manager / Admin ──
+        if schedule:
+            total = schedule.slots.count()
+            filled = schedule.slots.exclude(assignment_status="open").count()
+
+            return Response({
+                "exists": True,
+                "schedule_id": schedule.id,
+                "status": schedule.status,
+                "status_display": schedule.get_status_display(),
+                "year": year,
+                "month": month,
+                "venue_name": venue.name,
+                "slots_total": total,
+                "slots_filled": filled,
+                "slots_open": total - filled,
+                "published_at": schedule.published_at,
+                "can_generate": False,  # уже есть
+            })
+        else:
+            # Проверить есть ли обученная модель
+            from forecasting.models import ForecastRun
+            has_model = ForecastRun.objects.filter(
+                status="completed",
+                train_model=True,
+            ).exists()
+
+            return Response({
+                "exists": False,
+                "year": year,
+                "month": month,
+                "venue_name": venue.name,
+                "can_generate": has_model,
+                "message": "Расписание не найдено."
+                    if has_model
+                    else "Расписание не найдено. Модель не обучена — обратитесь к администратору.",
+            })
+            
+class GenerateMonthlyScheduleView(APIView):
+    """
+    Упрощённая генерация расписания для менеджера.
+
+    Менеджер указывает venue + year + month.
+    Бэкенд:
+    1. Проверяет что модель обучена (admin уже сделал это)
+    2. Запускает прогноз на нужный месяц (forecast)
+    3. Запускает scheduler (OR-Tools) → waiter_schedule.csv
+    4. Парсит CSV → MonthlySchedule (draft)
+    5. Возвращает созданное расписание
+
+    Менеджер НЕ тренирует модель. Он использует то, что подготовил admin.
+    """
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def post(self, request):
+        venue_id = request.data.get("venue")
+        year = request.data.get("year")
+        month = request.data.get("month")
+
+        # ── Валидация ──
+        if not venue_id:
+            if request.user.venue:
+                venue_id = request.user.venue_id
+            else:
+                return Response(
+                    {"detail": "Укажите venue."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            venue = Venue.objects.get(id=venue_id, is_active=True)
+        except Venue.DoesNotExist:
+            return Response({"detail": "Объект не найден."}, status=404)
+
+        # Определить год/месяц
+        if not year or not month:
+            today = date.today()
+            if today.month == 12:
+                year, month = today.year + 1, 1
+            else:
+                year, month = today.year, today.month + 1
+        else:
+            year, month = int(year), int(month)
+
+        # ── Проверить что расписание ещё не создано ──
+        existing = MonthlySchedule.objects.filter(
+            venue=venue, year=year, month=month
+        ).first()
+
+        if existing:
+            if existing.status == "published":
+                return Response(
+                    {"detail": f"Расписание на {month:02d}/{year} уже опубликовано."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            else:
+                # Черновик — удалить и перегенерировать
+                existing.delete()
+
+        # ── Проверить что модель обучена ──
+        from forecasting.models import ForecastRun
+        has_model = ForecastRun.objects.filter(
+            status="completed",
+            train_model=True,
+        ).exists()
+
+        if not has_model:
+            return Response(
+                {"detail": "Модель не обучена. Обратитесь к администратору."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Шаг 1: Прогноз на нужный месяц ──
+        from forecasting.services.ml_runner import MLRunner
+        from forecasting.services.forecast_loader import load_forecast_to_db, ForecastLoadError
+
+        # Определить даты прогноза
+        _, last_day = calendar.monthrange(year, month)
+        forecast_from = date(year, month, 1)
+        forecast_to = date(year, month, last_day)
+
+        forecast_run = ForecastRun.objects.create(
+            venue=venue,
+            triggered_by=request.user,
+            process_data=False,   # Данные уже обработаны админом
+            train_model=False,    # Модель уже обучена админом
+            make_forecast=True,
+            evaluate=False,
+            forecast_from=forecast_from,
+            forecast_to=forecast_to,
+        )
+
+        try:
+            runner = MLRunner(forecast_run)
+            runner.execute()
+        except Exception as e:
+            return Response(
+                {"detail": f"Ошибка прогноза: {forecast_run.error_message}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Загрузить прогнозы в БД
+        try:
+            load_forecast_to_db(forecast_run)
+        except ForecastLoadError as e:
+            return Response(
+                {"detail": f"Прогноз создан, но ошибка загрузки: {e}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # ── Шаг 2: Генерация расписания ──
+        from forecasting.services.schedule_generator import (
+            generate_schedule_full,
+            ScheduleGenerationError,
+        )
+
+        try:
+            result = generate_schedule_full(venue)
+        except ScheduleGenerationError as e:
+            return Response(
+                {"detail": f"Ошибка генерации расписания: {e}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # ── Вернуть созданное расписание ──
+        schedule = MonthlySchedule.objects.prefetch_related(
+            "slots__entries",
+            "slots__assigned_employee",
+        ).get(id=result["schedule_id"])
+
+        from .serializers import MonthlyScheduleDetailSerializer
+        serializer = MonthlyScheduleDetailSerializer(schedule)
+
+        return Response({
+            "detail": "Расписание сгенерировано (черновик).",
+            "forecast_run_id": forecast_run.id,
+            "schedule": serializer.data,
+        }, status=status.HTTP_201_CREATED)

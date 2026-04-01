@@ -9,14 +9,22 @@ from .views import (
     ClaimSlotView,
     AssignSlotView,
     UnassignSlotView,
+    ScheduleStatusView,
+    GenerateMonthlyScheduleView,
 )
 
 urlpatterns = [
     # Venues
     path("venues/", VenueListView.as_view(), name="venue-list"),
 
-    # Schedule
+    # Schedule — статус и генерация
+    path("schedule/status/", ScheduleStatusView.as_view(), name="schedule-status"),
+    path("schedule/generate/", GenerateMonthlyScheduleView.as_view(), name="schedule-generate"),
+
+    # Schedule — ручная загрузка CSV
     path("schedule/upload/", UploadScheduleView.as_view(), name="schedule-upload"),
+
+    # Schedule — CRUD
     path("schedule/monthly/", MonthlyScheduleListView.as_view(), name="schedule-list"),
     path("schedule/monthly/<int:pk>/", MonthlyScheduleDetailView.as_view(), name="schedule-detail"),
     path("schedule/monthly/<int:pk>/publish/", PublishScheduleView.as_view(), name="schedule-publish"),
