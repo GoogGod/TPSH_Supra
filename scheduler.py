@@ -74,23 +74,60 @@ class WaiterScheduler:
         forecast_df: pd.DataFrame,
         waiter_config: Dict[int, str]
     ) -> pd.DataFrame:
+        """
+        Рассчитывает необходимое количество официантов на каждый час.
+        Создаёт колонку 'waiters_equiv_novice' для оптимизатора.
+        """
         df = forecast_df.copy()
         
-        # Конвертируем гостей в "эквивалентных новичков" (1 специалист = 2 новичка)
-        # Это позволяет планировать смешанные бригады
+        # Вместимость по типам официантов (в эквиваленте новичков)
+        # specialist = 10 гостей = 2 новичка (так как novice = 5 гостей)
+        # novice = 5 гостей = 1 новичок
+        capacities_in_novices = {
+            'specialist': 2.0,
+            'novice': 1.0
+        }
+        
+        # Общая вместимость бригады в эквиваленте новичков
+        total_capacity_novices = sum(capacities_in_novices[t] for t in waiter_config.values())
+        
+        # Используем гостей с буфером
+        if 'guests_with_buffer' in df.columns:
+            guests_column = 'guests_with_buffer'
+        else:
+            guests_column = 'guests_predicted'
+        
+        # Расчёт потребности в эквиваленте новичков
+        # Формула: (Гости / Средняя вместимость одного официанта) * Коэффициент перевода в новички
+        # Но проще: (Гости / 5) так как 5 гостей = 1 единица нагрузки новичка
+        
         df['waiters_equiv_novice'] = np.ceil(
-            df['guests_with_buffer'] / WAITER_TYPES['novice']['capacity']
+            df[guests_column] / 5.0  # 5 гостей = 1 единица нагрузки (как один новичок)
+        ).astype(int)
+        
+        # Также создаём обычную колонку waiters_needed (количество людей)
+        # Средняя вместимость человека в вашей бригаде
+        avg_capacity_per_person = total_capacity_novices * 5.0 / len(waiter_config)
+        
+        df['waiters_needed'] = np.ceil(
+            df[guests_column] / avg_capacity_per_person
         ).astype(int)
         
         # Минимум 1 официант в рабочие часы
         working_mask = (df['hour'] >= self.working_hour_start) & \
                        (df['hour'] < self.working_hour_end)
+        
         df.loc[working_mask, 'waiters_equiv_novice'] = df.loc[
             working_mask, 'waiters_equiv_novice'
+        ].clip(lower=1)  # Минимум 1 единица нагрузки
+        
+        df.loc[working_mask, 'waiters_needed'] = df.loc[
+            working_mask, 'waiters_needed'
         ].clip(lower=self.min_waiters_per_shift)
         
         # Вне рабочих часов — 0
         df.loc[~working_mask, 'waiters_equiv_novice'] = 0
+        df.loc[~working_mask, 'waiters_needed'] = 0
         
         return df
     
@@ -562,7 +599,7 @@ def create_waiter_schedule(
         print(f"Конфигурация официантов: {waiter_config}")
     
     forecast_df = pd.read_csv(forecast_path, encoding='utf-8-sig')
-    forecast_df['datetime'] = pd.to_datetime(forecast_df['forecast_datetime'])
+    forecast_df['datetime'] = pd.to_datetime(forecast_df['datetime'])
     
     scheduler = WaiterScheduler()
     

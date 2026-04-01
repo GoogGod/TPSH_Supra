@@ -258,9 +258,8 @@ def _clean_for_predict(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _print_forecast_report(df_pred: pd.DataFrame):
-    print("\nПРОГНОЗ ПО ЧАСАМ (первые 24 часа)")
+    print("\nПРОГНОЗ ПО ЧАСАМ")
     print(f"{'Дата-время':<20} {'Час':<5} {'День':<5} {'Пик':<4} {'Заказов':<9} {'Гостей':<10}")
-    print("-" * 65)
     
     day_names = {0: 'Пн', 1: 'Вт', 2: 'Ср', 3: 'Чт', 4: 'Пт', 5: 'Сб', 6: 'Вс'}
     
@@ -268,25 +267,30 @@ def _print_forecast_report(df_pred: pd.DataFrame):
         dt_str = row['datetime'].strftime('%Y-%m-%d %H:00')
         day_name = day_names.get(row['day_of_week'], '')
         peak = '1' if row['is_peak_hour'] else '0'
-        print(f"{dt_str:<20} {row['hour']:<5} {day_name:<5} {peak:<4} {row['orders_predicted']:<9} {row['guests_predicted']:<10}")
+        # ← Используем buffer
+        print(f"{dt_str:<20} {row['hour']:<5} {day_name:<5} {peak:<4} {row['orders_with_buffer']:<9} {row['guests_with_buffer']:<10}")
     
     print(f"\nВсего часов прогноза: {len(df_pred)}")
-    print(f"{'Заказы:':<20} среднее {df_pred['orders_predicted'].mean():.2f}/час, всего {df_pred['orders_predicted'].sum()}")
-    print(f"{'Гости:':<20}  среднее {df_pred['guests_predicted'].mean():.2f}/час, всего {df_pred['guests_predicted'].sum()}")
+    # ← Используем buffer
+    print(f"{'Заказы:':<20} среднее {df_pred['orders_with_buffer'].mean():.2f}/час, всего {df_pred['orders_with_buffer'].sum()}")
+    print(f"{'Гости:':<20}  среднее {df_pred['guests_with_buffer'].mean():.2f}/час, всего {df_pred['guests_with_buffer'].sum()}")
     
     working_mask = (df_pred['hour'] >= WORKING_HOUR_START) & (df_pred['hour'] < WORKING_HOUR_END)
     night_mask = ~working_mask
     
     print(f"\nРабочие часы ({WORKING_HOUR_START}:00-{WORKING_HOUR_END}:00):")
-    print(f"   Заказы: {df_pred[working_mask]['orders_predicted'].mean():.2f}/час, всего {df_pred[working_mask]['orders_predicted'].sum()}")
-    print(f"   Гости:  {df_pred[working_mask]['guests_predicted'].mean():.2f}/час, всего {df_pred[working_mask]['guests_predicted'].sum()}")
+    # ← Используем buffer
+    print(f"   Заказы: {df_pred[working_mask]['orders_with_buffer'].mean():.2f}/час, всего {df_pred[working_mask]['orders_with_buffer'].sum()}")
+    print(f"   Гости:  {df_pred[working_mask]['guests_with_buffer'].mean():.2f}/час, всего {df_pred[working_mask]['guests_with_buffer'].sum()}")
     
     print(f"\nНочные часы (00:00-{WORKING_HOUR_START}:00, {WORKING_HOUR_END}:00-23:00):")
-    print(f"   Заказы: {df_pred[night_mask]['orders_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['orders_predicted'].sum()}")
-    print(f"   Гости:  {df_pred[night_mask]['guests_predicted'].mean():.2f}/час, всего {df_pred[night_mask]['guests_predicted'].sum()}")
+    print(f"   Заказы: {df_pred[night_mask]['orders_with_buffer'].mean():.2f}/час, всего {df_pred[night_mask]['orders_with_buffer'].sum()}")
+    print(f"   Гости:  {df_pred[night_mask]['guests_with_buffer'].mean():.2f}/час, всего {df_pred[night_mask]['guests_with_buffer'].sum()}")
     
     print(f"\nПрогноз по дням:")
     df_pred['date'] = df_pred['datetime'].dt.date
-    daily = df_pred.groupby('date')[['orders_predicted', 'guests_predicted']].sum()
+    # ← Используем buffer
+    daily = df_pred.groupby('date')[['orders_with_buffer', 'guests_with_buffer']].sum()
+    daily.columns = ['orders_with_buffer', 'guests_with_buffer']
     for date, row in daily.head(7).iterrows():
-        print(f"   {date}: {int(row['orders_predicted'])} заказов, {int(row['guests_predicted'])} гостей")
+        print(f"   {date}: {int(row['orders_with_buffer'])} заказов (с буфером), {int(row['guests_with_buffer'])} гостей (с буфером)")

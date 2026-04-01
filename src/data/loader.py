@@ -13,7 +13,7 @@ def load_raw_dataset(file_path: Union[str, Path]) -> pd.DataFrame:
     if file_path.suffix.lower() == '.csv':
         df = pd.read_csv(file_path, encoding='utf-8-sig', low_memory=False)
     elif file_path.suffix.lower() == '.xlsx':
-        df = pd.read_excel(file_path, header=1)
+        df = pd.read_excel(file_path, header=None)
     else:
         raise ValueError(f"Неподдерживаемый формат: {file_path.suffix}")
     
@@ -62,7 +62,7 @@ def load_and_merge_new_data(
             print(f"\nОбработка {file.name}...")
         
         try:
-            raw_df = pd.read_excel(file, header=1)
+            raw_df = pd.read_excel(file, header=None)
             processed_new = _process_new_file(raw_df, verbose=verbose)
             new_dfs.append(processed_new)
             
@@ -109,50 +109,71 @@ def load_and_merge_new_data(
 def _process_new_file(raw_df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     df = raw_df.copy()
     
-    # Проверка: если первая колонка содержит "Терраса" или похожие значения,
-    # значит заголовков нет — используем позиционный маппинг
-    first_col_sample = str(df.iloc[0, 0]).lower() if len(df) > 0 else ''
+    if len(df) < 2:
+        raise ValueError("Файл пуст или содержит менее 2 строк")
     
-    if 'террас' in first_col_sample or 'зал' in first_col_sample or first_col_sample.isdigit():
-        # Позиционный маппинг (без заголовков)
+    # Проверяем первую строку на наличие итогов (цифры в любых колонках)
+    first_row = df.iloc[0]
+    has_totals = False
+    
+    for val in first_row:
+        val_str = str(val).replace(',', '').replace('.', '').strip()
+        if val_str.isdigit() and len(val_str) > 3:
+            has_totals = True
+            break
+    
+    if has_totals:
         if verbose:
-            print("  Режим: позиционный маппинг (файл без заголовков)")
-        
-        # Проверяем, что колонок достаточно
-        if len(df.columns) < 6:
-            raise ValueError(f"Ожидается минимум 6 колонок, найдено: {len(df.columns)}")
-        
-        # Переименование по позициям
-        df.columns = ['department', 'account_date', 'check_number', 
-                      'open_time', 'close_time', 'orders_count', 'guests_count'][:len(df.columns)]
-    else:
-        # Маппинг по названиям колонок (автоматическое определение)
-        column_mapping = {}
-        
-        for col in df.columns:
-            col_str = str(col).lower()
-            if any(k in col_str for k in ['время', 'open', 'time', 'открыт']):
-                column_mapping[col] = 'open_time'
-            elif any(k in col_str for k in ['чек', 'номер', 'check']):
-                column_mapping[col] = 'check_number'
-            elif any(k in col_str for k in ['заказ', 'order']):
-                column_mapping[col] = 'orders_count'
-            elif any(k in col_str for k in ['гость', 'guest']):
-                column_mapping[col] = 'guests_count'
-            elif any(k in col_str for k in ['отдел', 'depart']):
-                column_mapping[col] = 'department'
-            elif any(k in col_str for k in ['учет', 'account', 'date']):
-                column_mapping[col] = 'account_date'
-            elif any(k in col_str for k in ['закрыт', 'close']):
-                column_mapping[col] = 'close_time'
-        
-        if column_mapping:
-            df = df.rename(columns=column_mapping)
-            if verbose:
-                print(f"  Найдено колонок: {len(column_mapping)}")
+            print("  Обнаружена строка итогов - пропускаем")
+        df = df.iloc[1:].reset_index(drop=True)
     
-    # Проверка обязательных колонок
+    if len(df) < 1:
+        raise ValueError("Нет данных после пропуска строки итогов")
+    
+    # Проверяем вторую строку - если это заголовки (русский текст), используем их
+    second_row = df.iloc[0]
+    has_headers = False
+    
+    for val in second_row:
+        val_str = str(val)
+        if any(k in val_str for k in ['Отделение', 'Учет', 'Номер', 'Время', 'Заказ', 'Гость']):
+            has_headers = True
+            break
+    
+    if has_headers:
+        if verbose:
+            print("  Обнаружены заголовки - используем как названия колонок")
+        df.columns = df.iloc[0]
+        df = df[1:].reset_index(drop=True)
+    
+    if len(df) < 1:
+        raise ValueError("Нет данных после пропуска заголовков")
+    
+    # Маппинг русских названий на английские
+    mapping = {
+        'Отделение': 'department',
+        'Учетный день': 'account_date',
+        'Номер чека': 'check_number',
+        'Время открытия': 'open_time',
+        'Время закрытия': 'close_time',
+        'Заказов': 'orders_count',
+        'Количество гостей': 'guests_count'
+    }
+    df = df.rename(columns=mapping)
+    
+    # Если колонки всё ещё не те - пробуем позиционный маппинг
     required = ['open_time', 'orders_count', 'guests_count']
+    missing = [col for col in required if col not in df.columns]
+    
+    if missing:
+        if verbose:
+            print("  Заголовки не распознаны - используем позиционный маппинг")
+        
+        if len(df.columns) >= 7:
+            df.columns = ['department', 'account_date', 'check_number', 
+                          'open_time', 'close_time', 'orders_count', 'guests_count'][:len(df.columns)]
+    
+    # Финальная проверка
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Отсутствуют колонки: {missing}. Доступные: {list(df.columns)}")
@@ -161,23 +182,24 @@ def _process_new_file(raw_df: pd.DataFrame, verbose: bool = True) -> pd.DataFram
     def parse_datetime(val):
         if pd.isna(val):
             return pd.NaT
-        # Пробуем разные форматы
         for fmt in ['%m/%d/%Y %H:%M', '%d.%m.%Y %H:%M', '%Y-%m-%d %H:%M', '%d/%m/%Y %H:%M']:
             try:
                 return datetime.strptime(str(val).strip(), fmt)
             except:
                 continue
-        # Fallback: pandas auto-parse
         return pd.to_datetime(val, errors='coerce')
     
     df['order_datetime'] = df['open_time'].apply(parse_datetime)
     df = df.dropna(subset=['order_datetime'])
     
-    # Фильтр рабочих часов
     df['hour'] = df['order_datetime'].dt.hour
+    df['day_of_week'] = df['order_datetime'].dt.weekday
+    df['date'] = df['order_datetime'].dt.date
+    df['month'] = df['order_datetime'].dt.month
+    df['year'] = df['order_datetime'].dt.year
+    
     df = df[(df['hour'] >= 10) & (df['hour'] < 23)]
     
-    # Агрегация по часам
     df_agg = df.groupby(df['order_datetime'].dt.floor('h')).agg(
         orders_count=('orders_count', 'sum'),
         guests_count=('guests_count', 'sum'),
@@ -187,7 +209,6 @@ def _process_new_file(raw_df: pd.DataFrame, verbose: bool = True) -> pd.DataFram
     
     df_agg.rename(columns={'order_datetime': 'datetime'}, inplace=True)
     
-    # Заполнение пропущенных часов
     full_range = pd.date_range(
         start=df_agg['datetime'].min(),
         end=df_agg['datetime'].max(),
@@ -196,7 +217,6 @@ def _process_new_file(raw_df: pd.DataFrame, verbose: bool = True) -> pd.DataFram
     df_agg = df_agg.set_index('datetime').reindex(full_range, fill_value=0)
     df_agg = df_agg.reset_index().rename(columns={'index': 'datetime'})
     
-    # Погодные колонки (заполняем нулями)
     for col in ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']:
         df_agg[col] = 0
     

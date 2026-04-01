@@ -41,7 +41,7 @@ def main(
             verbose=verbose,
             force_reprocess=True
         )
-    
+
     # Загрузка и подготовка данных
     print("\nЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ")
     
@@ -188,8 +188,9 @@ def main(
         print(f"   С: {forecast['datetime'].min()}")
         print(f"   По: {forecast['datetime'].max()}")
         print(f"   Всего часов: {len(forecast)}")
-        print(f"   Всего заказов: {forecast['orders_predicted'].sum()}")
-        print(f"   Всего гостей: {forecast['guests_predicted'].sum()}")
+        print(f"   Всего заказов: {forecast['orders_with_buffer'].sum()} (с буфером +25%)")
+        print(f"   Всего гостей: {forecast['guests_with_buffer'].sum()} (с буфером +25%)")
+        print(f"   Среднее в час: {forecast['orders_with_buffer'].mean():.2f} заказов, {forecast['guests_with_buffer'].mean():.2f} гостей")
     
     if schedule_df is not None:
         print(f"\nРасписание официантов:")
@@ -218,7 +219,7 @@ if __name__ == '__main__':
         make_forecast=True,
         evaluate=True,
         make_schedule=True,
-        incremental_training=True,
+        incremental_training=False,
         model_type='xgboost',
         num_waiters=7,
         waiter_config=waiter_config,
