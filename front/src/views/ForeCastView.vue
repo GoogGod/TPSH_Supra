@@ -14,20 +14,20 @@
           <button class="side-menu-close" @click="closeMenu">✕</button>
         </div>
 
-<div class="side-menu-section">
-  <button class="side-menu-item" @click="goToProfile">
-    Профиль
-  </button>
-  <button class="side-menu-item active" @click="closeMenu">
-    Расписание
-  </button>
-</div>
+        <div class="side-menu-section">
+          <button class="side-menu-item" @click="goToProfile">
+            Профиль
+          </button>
+          <button class="side-menu-item active" @click="closeMenu">
+            Расписание
+          </button>
+        </div>
 
-<div class="side-menu-footer">
-  <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
-    Выйти
-  </button>
-</div>
+        <div class="side-menu-footer">
+          <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
+            Выйти
+          </button>
+        </div>
       </aside>
     </transition>
 
@@ -46,125 +46,161 @@
           </div>
         </div>
 
-<div v-if="canManageSchedule" class="manager-empty-state">
-  <div>
-    <p class="empty-state-title">Расписание пока не создано</p>
-  </div>
-  <button class="create-schedule-button" @click="handleCreateSchedule">
-    Создать расписание
-  </button>
-</div>
+        <div v-if="isLoadingSchedule" class="schedule-status-card">
+          <p class="empty-state-title">Загружаем расписание</p>
+          <p class="empty-state-text">
+            Подтягиваем смены из базы за выбранный месяц.
+          </p>
+        </div>
 
-<div v-else-if="showWaiterEmptyState" class="waiter-empty-state">
-  <p class="empty-state-title">Расписание на текущий месяц ещё не создано</p>
-</div>
+        <div v-else-if="scheduleError" class="schedule-status-card is-error">
+          <p class="empty-state-title">Не удалось загрузить расписание</p>
+          <p class="empty-state-text">{{ scheduleError }}</p>
+          <button class="create-schedule-button secondary-action-button" @click="loadSchedule">
+            Повторить
+          </button>
+        </div>
 
-        <template v-if="hasSchedule">
+        <div v-else-if="showCreateScheduleButton" class="manager-empty-state">
+          <div>
+            <p class="empty-state-title">Расписание пока не создано</p>
+            <p class="empty-state-text">
+              В базе нет расписания на выбранный месяц. Можно запустить
+              автогенерацию прямо с этого экрана.
+            </p>
+          </div>
+          <button
+            class="create-schedule-button"
+            :disabled="isGeneratingSchedule"
+            @click="handleCreateSchedule"
+          >
+            {{ isGeneratingSchedule ? 'Создаем...' : 'Создать расписание' }}
+          </button>
+        </div>
+
+        <div v-else-if="!hasSchedule" class="manager-empty-state">
+          <div>
+            <p class="empty-state-title">Расписание на текущий месяц ещё не создано</p>
+            <p class="empty-state-text">
+              За выбранный период в базе пока нет доступных назначений.
+            </p>
+          </div>
+        </div>
+
+        <template v-else>
           <div class="month-switcher">
-            <button class="month-button" @click="prevMonth">‹</button>
+            <button class="month-button" :disabled="isMonthSwitching" @click="prevMonth">‹</button>
             <div class="month-label">{{ monthTitle }}</div>
-            <button class="month-button" @click="nextMonth">›</button>
+            <button class="month-button" :disabled="isMonthSwitching" @click="nextMonth">›</button>
           </div>
 
-          <div class="forecast-controls">
-            <div class="waiter-selector-card">
-              <label class="selector-label" for="waiterSelect">Выбери официанта</label>
-              <select
-                id="waiterSelect"
-                class="selector-input"
-                v-model.number="selectedWaiter"
-              >
-                <option
-                  v-for="waiter in waiters"
-                  :key="waiter.waiter_num"
-                  :value="waiter.waiter_num"
+          <div v-if="waiters.length > 0">
+            <div class="forecast-controls">
+              <div class="waiter-selector-card">
+                <label class="selector-label" for="waiterSelect">Выбери сотрудника</label>
+                <select
+                  id="waiterSelect"
+                  class="selector-input"
+                  v-model="selectedWaiter"
                 >
-                  Официант {{ waiter.waiter_num }}
-                </option>
-              </select>
-            </div>
-
-            <div v-if="selectedWaiterInfo" class="selected-waiter-card">
-              <div class="selected-waiter-head">
-                <span
-                  class="waiter-color-dot"
-                  :style="{ backgroundColor: selectedWaiterInfo.color }"
-                ></span>
-                <span class="selected-waiter-name">
-                  Официант {{ selectedWaiterInfo.waiter_num }}
-                </span>
-              </div>
-
-              <div class="selected-waiter-meta">
-                Уровень:
-                <strong>{{ selectedWaiterInfo.grade || 'не указан' }}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div class="waiter-legend">
-            <div
-              v-for="waiter in waiters"
-              :key="waiter.waiter_num"
-              class="legend-item"
-              :class="{ active: waiter.waiter_num === selectedWaiter }"
-              @click="selectedWaiter = waiter.waiter_num"
-            >
-              <span
-                class="legend-color"
-                :style="{ backgroundColor: waiter.color }"
-              ></span>
-              <span class="legend-text">Официант {{ waiter.waiter_num }}</span>
-            </div>
-          </div>
-
-          <div class="calendar-card">
-            <div class="calendar-weekdays">
-              <div
-                v-for="weekday in weekdays"
-                :key="weekday"
-                class="weekday-cell"
-              >
-                {{ weekday }}
-              </div>
-            </div>
-
-            <div class="calendar-grid">
-              <div
-                v-for="day in calendarDays"
-                :key="day.key"
-                class="calendar-cell"
-                :class="{
-                  'outside-month': !day.isCurrentMonth,
-                  'is-working': !!day.shift,
-                  'is-today': day.isToday
-                }"
-                :style="getDayStyle(day)"
-              >
-                <div class="day-number">{{ day.date.getDate() }}</div>
-
-                <template v-if="day.shift">
-                  <div class="shift-badge">
-                    {{ getShiftLabel(day.shift.shift_type) }}
-                  </div>
-
-                  <div
-                    v-if="day.shift.work_start && day.shift.work_end"
-                    class="shift-time"
+                  <option
+                    v-for="waiter in waiters"
+                    :key="waiter.employee_key"
+                    :value="waiter.employee_key"
                   >
-                    {{ day.shift.work_start }}–{{ day.shift.work_end }}
-                  </div>
+                    {{ waiter.label }}
+                  </option>
+                </select>
+              </div>
 
-                  <div v-else-if="day.shift.work_hours" class="shift-time">
-                    {{ day.shift.work_hours }} ч
-                  </div>
-                </template>
+              <div v-if="selectedWaiterInfo" class="selected-waiter-card">
+                <div class="selected-waiter-head">
+                  <span
+                    class="waiter-color-dot"
+                    :style="{ backgroundColor: selectedWaiterInfo.color }"
+                  ></span>
+                  <span class="selected-waiter-name">
+                    {{ selectedWaiterInfo.label }}
+                  </span>
+                </div>
+
+                <div class="selected-waiter-meta">
+                  Уровень:
+                  <strong>{{ selectedWaiterInfo.grade || 'не указан' }}</strong>
+                </div>
               </div>
             </div>
+
+            <div class="waiter-legend">
+              <div
+                v-for="waiter in waiters"
+                :key="waiter.employee_key"
+                class="legend-item"
+                :class="{ active: waiter.employee_key === selectedWaiter }"
+                @click="selectedWaiter = waiter.employee_key"
+              >
+                <span
+                  class="legend-color"
+                  :style="{ backgroundColor: waiter.color }"
+                ></span>
+                <span class="legend-text">{{ waiter.label }}</span>
+              </div>
+            </div>
+
+            <div class="calendar-card">
+              <div class="calendar-weekdays">
+                <div
+                  v-for="weekday in weekdays"
+                  :key="weekday"
+                  class="weekday-cell"
+                >
+                  {{ weekday }}
+                </div>
+              </div>
+
+              <div class="calendar-grid">
+                <div
+                  v-for="day in calendarDays"
+                  :key="day.key"
+                  class="calendar-cell"
+                  :class="{
+                    'outside-month': !day.isCurrentMonth,
+                    'is-working': !!day.shift,
+                    'is-today': day.isToday
+                  }"
+                  :style="getDayStyle(day)"
+                >
+                  <div class="day-number">{{ day.date.getDate() }}</div>
+
+                  <template v-if="day.shift">
+                    <div class="shift-badge">
+                      {{ getShiftLabel(day.shift.shift_type) }}
+                    </div>
+
+                    <div
+                      v-if="day.shift.work_start && day.shift.work_end"
+                      class="shift-time"
+                    >
+                      {{ day.shift.work_start }}–{{ day.shift.work_end }}
+                    </div>
+
+                    <div v-else-if="day.shift.work_hours" class="shift-time">
+                      {{ day.shift.work_hours }} ч
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="schedule-status-card">
+            <p class="empty-state-title">Расписание найдено, но назначений пока нет</p>
+            <p class="empty-state-text">
+              Шаблон смен уже есть в базе, но сотрудники на выбранный месяц ещё не назначены.
+            </p>
           </div>
         </template>
       </section>
-
     </main>
   </div>
 </template>
@@ -172,6 +208,7 @@
 <script>
 import '../assets/forecast.css'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
+import { fetchScheduleForMonth, generateSchedule } from '../services/schedule'
 
 const WAITER_COLORS = [
   '#f06292',
@@ -184,89 +221,83 @@ const WAITER_COLORS = [
   '#ba68c8'
 ]
 
-const MOCK_SCHEDULE = []
-
 export default {
   name: 'ForeCastView',
-data() {
-  return {
-    menuOpen: false,
-    currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-    selectedWaiter: null,
-    weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
-    scheduleRaw: MOCK_SCHEDULE,
-    user: (() => {
-      try {
-        return JSON.parse(localStorage.getItem('user')) || { role: '' }
-      } catch (e) {
-        return { role: '' }
-      }
-    })()
-  }
-},
+  data() {
+    return {
+      menuOpen: false,
+      currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+      selectedWaiter: '',
+      weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
+      scheduleRaw: [],
+      scheduleExists: false,
+      scheduleError: '',
+      isLoadingSchedule: false,
+      isMonthSwitching: false,
+      isGeneratingSchedule: false,
+      user: (() => {
+        try {
+          return JSON.parse(localStorage.getItem('user')) || { role: '' }
+        } catch (error) {
+          return { role: '' }
+        }
+      })()
+    }
+  },
   computed: {
-    isManager() {
-      return ['MANAGER', 'manager'].includes(this.user.role)
+    canManageSchedule() {
+      return ['manager', 'admin'].includes(String(this.user.role || '').toLowerCase())
     },
-      isAdmin() {
-    return String(this.user.role || '').toUpperCase() === 'ADMIN'
-  },
-  canManageSchedule() {
-    const role = String(this.user.role || '').toUpperCase()
-    return role === 'MANAGER' || role === 'ADMIN'
-  },
     hasSchedule() {
-      return this.workingSchedule.length > 0
+      return this.scheduleExists
     },
     showCreateScheduleButton() {
-      return this.isManager && !this.hasSchedule
+      return this.canManageSchedule && !this.hasSchedule
     },
-    showWaiterEmptyState() {
-  return !this.isManager && !this.hasSchedule
-},
     workingSchedule() {
-      return this.scheduleRaw.filter(item => item.is_working === true)
+      return this.scheduleRaw.filter(
+        (item) => item.is_working === true && item.employee_key
+      )
     },
-
     waiters() {
       const grouped = new Map()
 
-      this.workingSchedule.forEach(item => {
-        if (!grouped.has(item.waiter_num)) {
-          grouped.set(item.waiter_num, {
+      this.workingSchedule.forEach((item) => {
+        if (!grouped.has(item.employee_key)) {
+          grouped.set(item.employee_key, {
+            employee_key: item.employee_key,
             waiter_num: item.waiter_num,
+            label: item.employee_label || this.getFallbackEmployeeLabel(item),
             grade: item.grade || null,
-            color: this.getWaiterColor(item.waiter_num)
+            color: this.getWaiterColor(item.employee_key)
           })
         }
       })
 
-      return Array.from(grouped.values()).sort((a, b) => a.waiter_num - b.waiter_num)
+      return Array.from(grouped.values()).sort((left, right) =>
+        left.label.localeCompare(right.label, 'ru')
+      )
     },
-
     selectedWaiterInfo() {
-      return this.waiters.find(item => item.waiter_num === this.selectedWaiter) || null
+      return this.waiters.find((item) => item.employee_key === this.selectedWaiter) || null
     },
-
     selectedWaiterScheduleMap() {
       const map = {}
 
       this.workingSchedule
-        .filter(item => item.waiter_num === this.selectedWaiter)
-        .forEach(item => {
+        .filter((item) => item.employee_key === this.selectedWaiter)
+        .forEach((item) => {
           map[item.date] = item
         })
 
       return map
     },
-
     monthTitle() {
       return this.currentMonth.toLocaleDateString('ru-RU', {
         month: 'long',
         year: 'numeric'
       })
     },
-
     calendarDays() {
       const year = this.currentMonth.getFullYear()
       const month = this.currentMonth.getMonth()
@@ -300,7 +331,6 @@ data() {
       return result
     }
   },
-
   async mounted() {
     try {
       const freshUser = await fetchCurrentUser()
@@ -308,55 +338,112 @@ data() {
       localStorage.setItem('user', JSON.stringify(freshUser))
     } catch (error) {
       const savedUser = localStorage.getItem('user')
+
       if (savedUser) {
-        this.user = JSON.parse(savedUser)
+        try {
+          this.user = JSON.parse(savedUser)
+        } catch (parseError) {
+          this.user = { role: '' }
+        }
       }
     }
 
-    if (this.waiters.length > 0) {
-      this.selectedWaiter = this.waiters[0].waiter_num
-    }
+    await this.loadSchedule()
   },
-
   methods: {
     handleLogout() {
-  this.menuOpen = false
-  logoutUser()
-  this.$router.replace('/login')
-},
+      this.menuOpen = false
+      logoutUser()
+      this.$router.replace('/login')
+    },
     openMenu() {
       this.menuOpen = true
     },
-
     closeMenu() {
       this.menuOpen = false
     },
-
     goToProfile() {
       this.menuOpen = false
       this.$router.push('/cabinet')
     },
-
-    prevMonth() {
+    async prevMonth() {
       this.currentMonth = new Date(
         this.currentMonth.getFullYear(),
         this.currentMonth.getMonth() - 1,
         1
       )
-    },
 
-    nextMonth() {
+      await this.loadSchedule({ isMonthSwitching: true })
+    },
+    async nextMonth() {
       this.currentMonth = new Date(
         this.currentMonth.getFullYear(),
         this.currentMonth.getMonth() + 1,
         1
       )
-    },
 
-    handleCreateSchedule() {
-      window.alert('Эндпоинт создания расписания пока не подключен. Кнопка перенесена на страницу расписания и показывается только при его отсутствии.')
+      await this.loadSchedule({ isMonthSwitching: true })
     },
+    async loadSchedule({ isMonthSwitching = false } = {}) {
+      this.scheduleError = ''
+      this.isLoadingSchedule = !isMonthSwitching
+      this.isMonthSwitching = isMonthSwitching
 
+      try {
+        const schedule = await fetchScheduleForMonth({
+          monthDate: this.currentMonth,
+          user: this.user
+        })
+
+        this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []
+        this.scheduleExists = Boolean(schedule.scheduleExists)
+        this.syncSelectedWaiter()
+      } catch (error) {
+        this.scheduleRaw = []
+        this.scheduleExists = false
+        this.selectedWaiter = ''
+        this.scheduleError = error.message || 'Не удалось загрузить расписание'
+      } finally {
+        this.isLoadingSchedule = false
+        this.isMonthSwitching = false
+      }
+    },
+    syncSelectedWaiter() {
+      if (this.waiters.length === 0) {
+        this.selectedWaiter = ''
+        return
+      }
+
+      const hasSelectedWaiter = this.waiters.some(
+        (item) => item.employee_key === this.selectedWaiter
+      )
+
+      if (!hasSelectedWaiter) {
+        this.selectedWaiter = this.waiters[0].employee_key
+      }
+    },
+    async handleCreateSchedule() {
+      if (this.isGeneratingSchedule) {
+        return
+      }
+
+      this.isGeneratingSchedule = true
+
+      try {
+        const response = await generateSchedule({ user: this.user })
+        const createdCount = Number(response?.created)
+        const successMessage = Number.isFinite(createdCount)
+          ? `Расписание создано. Новых смен: ${createdCount}.`
+          : 'Генерация расписания запущена.'
+
+        await this.loadSchedule()
+        window.alert(successMessage)
+      } catch (error) {
+        window.alert(error.message || 'Не удалось создать расписание')
+      } finally {
+        this.isGeneratingSchedule = false
+      }
+    },
     buildCalendarDay(date, isCurrentMonth) {
       const key = this.formatDateKey(date)
       const today = new Date()
@@ -372,36 +459,45 @@ data() {
         shift: this.selectedWaiterScheduleMap[key] || null
       }
     },
-
     formatDateKey(date) {
       const year = date.getFullYear()
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
       return `${year}-${month}-${day}`
     },
+    getFallbackEmployeeLabel(item) {
+      if (item.waiter_num || item.waiter_num === 0) {
+        return `Официант ${item.waiter_num}`
+      }
 
-    getWaiterColor(waiterNum) {
-      return WAITER_COLORS[(waiterNum - 1) % WAITER_COLORS.length]
+      return item.employee_key ? `Сотрудник ${item.employee_key}` : 'Сотрудник'
     },
+    getWaiterColor(employeeKey) {
+      const key = String(employeeKey || '')
+      const hash = key.split('').reduce((accumulator, char) => {
+        return accumulator + char.charCodeAt(0)
+      }, 0)
 
+      return WAITER_COLORS[hash % WAITER_COLORS.length]
+    },
     getShiftLabel(shiftType) {
       const map = {
         morning: 'Утро',
         evening: 'Вечер',
         full: 'Полный',
-        off: 'Выходной'
+        off: 'Выходной',
+        shift: 'Смена'
       }
 
       return map[shiftType] || shiftType || ''
     },
-
     getDayStyle(day) {
       if (!day.shift) {
         return {}
       }
 
       return {
-        backgroundColor: this.getWaiterColor(this.selectedWaiter),
+        backgroundColor: this.selectedWaiterInfo?.color || this.getWaiterColor(this.selectedWaiter),
         color: '#ffffff'
       }
     }

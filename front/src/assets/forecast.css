@@ -100,7 +100,6 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.68);
-  position: center;
 }
 
 .forecast-title {
@@ -108,7 +107,6 @@
   font-size: 32px;
   line-height: 1.1;
   font-family: 'Lora', serif;
-  position: center;
 }
 
 .month-switcher {
@@ -319,15 +317,15 @@
   flex-direction: column;
 }
 
-.side-menu-footer {
-  margin-top: auto;
-  padding-top: 16px;
-}
-
 .side-menu-top {
   display: flex;
   justify-content: flex-start;
   margin-bottom: 18px;
+}
+
+.side-menu-footer {
+  margin-top: auto;
+  padding-top: 16px;
 }
 
 .side-menu-close {
@@ -365,6 +363,10 @@
   background: linear-gradient(135deg, #49d17d, #2f9e62);
 }
 
+.side-menu-item-danger {
+  color: #ffd6d6;
+}
+
 .menu-overlay-enter-active,
 .menu-overlay-leave-active {
   transition: opacity 0.22s ease;
@@ -385,7 +387,6 @@
   transform: translateX(-100%);
 }
 
-/* mobile first */
 @media (max-width: 420px) {
   .forecast-content {
     padding: 14px 12px 90px;
@@ -489,6 +490,20 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.schedule-status-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.schedule-status-card.is-error {
+  border: 1px solid rgba(255, 115, 115, 0.35);
+  background: rgba(120, 18, 18, 0.2);
+}
+
 .empty-state-title {
   margin: 0 0 8px;
   font-size: 20px;
@@ -511,8 +526,13 @@
   font-weight: 700;
   cursor: pointer;
 }
-.empty-state-title {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.78);
-  line-height: 1.45;
+
+.create-schedule-button:disabled,
+.month-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.secondary-action-button {
+  background: rgba(255, 255, 255, 0.12);
 }

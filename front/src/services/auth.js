@@ -1,3 +1,5 @@
+import api from '../api'
+
 export const getAccessToken = () => localStorage.getItem('access')
 export const getRefreshToken = () => localStorage.getItem('refresh')
 
@@ -35,7 +37,10 @@ export const setCurrentUser = (user) => {
 }
 
 export const clearAuthData = () => {
-  localStorage.clear()
+  localStorage.removeItem('access')
+  localStorage.removeItem('refresh')
+  localStorage.removeItem('user')
+  localStorage.removeItem('isAuthenticated')
 }
 
 export const logoutUser = () => {
@@ -49,20 +54,8 @@ export const fetchCurrentUser = async () => {
     throw new Error('Нет access токена')
   }
 
-  const response = await fetch('http://localhost:8000/api/v1/users/me/', {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${access}`
-    },
-    credentials: 'include'
-  })
-
-  if (!response.ok) {
-    throw new Error('Не удалось получить текущего пользователя')
-  }
-
-  return await response.json()
+  const response = await api.get('/users/me/')
+  return response.data
 }
 
 export const ensureAuth = async () => {

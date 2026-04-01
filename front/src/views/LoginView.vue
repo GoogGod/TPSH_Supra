@@ -44,6 +44,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
+import { API_BASE_URL } from '../api'
 import { fetchCurrentUser } from '../services/auth'
 
 const router = useRouter()
@@ -54,10 +55,7 @@ const password = ref('')
 const errorMessage = ref('')
 const loading = ref(false)
 
-// true = проверка без backend
-const USE_MOCK_AUTH = false
-
-// Мок-пользователи для проверки логики ролей без backend
+const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 
 if (localStorage.getItem('access')) {
   router.replace('/cabinet')
@@ -74,7 +72,7 @@ const mockUsers = [
       last_name: 'Петров',
       phone: '+79990001122',
       role: 'MANAGER',
-      venue: 'Ресторан №1',
+      venue: 1,
       schedule_pattern: '5/2',
       shift_duration: '12 часов'
     }
@@ -89,11 +87,12 @@ const mockUsers = [
       last_name: 'Сидоров',
       phone: '+79990003344',
       role: 'WAITER',
-      venue: 'Ресторан №1',
+      venue: 1,
       schedule_pattern: '2/2',
       shift_duration: '12 часов'
     }
-  },  {
+  },
+  {
     username: 'admin',
     password: '123456',
     user: {
@@ -103,22 +102,36 @@ const mockUsers = [
       last_name: 'Сидоров',
       phone: '+79990003344',
       role: 'ADMIN',
-      venue: 'Ресторан №1',
+      venue: 1,
       schedule_pattern: '2/2',
       shift_duration: '12 часов'
     }
   }
 ]
 
+const extractLoginError = async (response) => {
+  try {
+    const data = await response.json()
+
+    if (typeof data === 'string') {
+      return data
+    }
+
+    return data.detail || data.message || 'Ошибка: неверный логин или пароль'
+  } catch (error) {
+    return 'Ошибка: неверный логин или пароль'
+  }
+}
+
 const handleMockLogin = async () => {
   const foundUser = mockUsers.find(
-    item =>
+    (item) =>
       item.username === username.value.trim() &&
       item.password === password.value.trim()
   )
 
   if (!foundUser) {
-    throw new Error('Ошибка: Неверный логин или пароль')
+    throw new Error('Ошибка: неверный логин или пароль')
   }
 
   localStorage.setItem('access', 'mock_access_token')
@@ -130,26 +143,22 @@ const handleMockLogin = async () => {
 }
 
 const handleBackendLogin = async () => {
-  const response = await fetch('http://localhost:8000/api/v1/auth/login/', {
+  const response = await fetch(`${API_BASE_URL}/auth/login/`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       username: username.value,
-      password: password.value,
-    }),
+      password: password.value
+    })
   })
 
-  const data = await response.json()
-
   if (!response.ok) {
-    throw new Error(
-      data.detail ||
-      data.message ||
-      'Ошибка: Неверный логин или пароль'
-    )
+    throw new Error(await extractLoginError(response))
   }
+
+  const data = await response.json()
 
   if (!data.access || !data.refresh) {
     throw new Error('Бэкенд не вернул access и refresh токены')
