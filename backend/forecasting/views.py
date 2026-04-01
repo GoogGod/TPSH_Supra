@@ -45,7 +45,7 @@ from .serializers import (
     MonthlyScheduleDetailSerializer,
     WaiterSlotDetailSerializer,
 )
-from .services.csv_parser import parse_schedule_csv, CSVParseError
+from shifts.services.csv_parser import parse_schedule_csv, CSVParseError
 from users.permissions import IsManager, IsEmployee, IsOnlyEmployee
 
 from user_notifications.services import (
@@ -113,7 +113,7 @@ class RunForecastView(APIView):
 
         run = ForecastRun.objects.create(
             venue=venue,
-            triggered_by=user,
+            triggered_by=request.user,
             process_data=data.get("process_data", False),
             train_model=data.get("train_model", False),
             make_forecast=data.get("make_forecast", True),

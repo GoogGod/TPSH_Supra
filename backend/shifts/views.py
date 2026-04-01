@@ -17,6 +17,7 @@ from .serializers import (
 from .services.csv_parser import parse_schedule_csv, CSVParseError
 from users.permissions import IsManager, IsEmployee
 from datetime import date
+import calendar
 
 from user_notifications.services import (
     notify_schedule_published,
