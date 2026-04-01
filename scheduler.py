@@ -23,14 +23,14 @@ WAITER_TYPES = {
 SHIFT_TYPES = {
     'full': {
         'name': 'Полная',
-        'start': 10,
+        'start': 9,
         'end': 22,    
         'hours': 12,
         'code': 1
     },
     'morning': {
         'name': 'Утренняя',
-        'start': 10,
+        'start': 9,
         'end': 16,
         'hours': 6,      
         'code': 2
@@ -317,29 +317,29 @@ class WaiterScheduler:
                     sum(sum(shift[(w, i, s)] for s in [1, 2, 3]) for i in range(d, d + 7)) <= 6
                 )
         
-        # 6. ЖЁСТКОЕ ОГРАНИЧЕНИЕ: минимум 70% полных смен у каждого официанта
+        # 6. Ограничение: минимум 50% полных смен (было 70%)
         for w in range(1, num_waiters + 1):
             total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
-            full_shifts_w = sum(shift[(w, d, 1)] for d in range(num_days))  # код 1 = Полная
+            full_shifts_w = sum(shift[(w, d, 1)] for d in range(num_days))
             
-            # Полные смены >= 70% от всех смен
-            model.Add(full_shifts_w * 10 >= total_shifts_w * 7)
+            # Полные смены >= 50% от всех смен
+            model.Add(full_shifts_w * 2 >= total_shifts_w)
         
-        # 7. Ограничение: максимум 20% утренних смен
+        # 7. Ограничение: максимум 30% утренних смен (было 20%)
         for w in range(1, num_waiters + 1):
             total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
             morning_shifts_w = sum(shift[(w, d, 2)] for d in range(num_days))
             
-            # Утренние <= 20% от всех смен
-            model.Add(morning_shifts_w * 5 <= total_shifts_w)
+            # Утренние <= 30% от всех смен
+            model.Add(morning_shifts_w * 10 <= total_shifts_w * 3)
         
-        # 8. Ограничение: максимум 20% вечерних смен
+        # 8. Ограничение: максимум 30% вечерних смен (было 20%)
         for w in range(1, num_waiters + 1):
             total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
             evening_shifts_w = sum(shift[(w, d, 3)] for d in range(num_days))
             
-            # Вечерние <= 20% от всех смен
-            model.Add(evening_shifts_w * 5 <= total_shifts_w)
+            # Вечерние <= 30% от всех смен
+            model.Add(evening_shifts_w * 10 <= total_shifts_w * 3)
         
         # ЦЕЛЕВАЯ ФУНКЦИЯ: только баланс часов (без штрафов за тип смены)
         
@@ -655,6 +655,11 @@ def create_waiter_schedule(
         waiter_config=waiter_config,
         verbose=verbose
     )
+    
+    if schedule_df is None or len(schedule_df) == 0:
+        if verbose:
+            print(f"\nНе удалось создать расписание — пропускаем сохранение")
+        return pd.DataFrame(), {}
     
     # Сохраняем расписание
     if output_path:

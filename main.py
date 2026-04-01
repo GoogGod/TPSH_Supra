@@ -210,7 +210,7 @@ def main(
 if __name__ == '__main__':
     waiter_config = {
         1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist', 5: 'specialist', 6: 'specialist', 7: 'specialist',
-        8: 'novice', 9: 'novice', 10: 'novice'
+        8: 'novice', 9: 'novice'
     }
     
     main(
@@ -221,7 +221,7 @@ if __name__ == '__main__':
         make_schedule=True,
         incremental_training=False,
         model_type='xgboost',
-        num_waiters=10,
+        num_waiters=9,
         waiter_config=waiter_config,
         verbose=True,
         force_fresh_weather=True,
