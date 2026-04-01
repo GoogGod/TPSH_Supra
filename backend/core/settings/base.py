@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 SECRET_KEY = os.getenv(
     'SECRET_KEY',
@@ -26,7 +26,8 @@ INSTALLED_APPS = [
     # Local Apps
     'users',
     'shifts',
-    'user_notifications'
+    'user_notifications',
+    'forecasting'
 ]
 
 MIDDLEWARE = [
@@ -40,6 +41,23 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# ═══════════ ПУТИ ML ═══════════
+# Корень репозитория (parent от backend/)
+REPO_ROOT = BASE_DIR.parent
+
+# Путь к ml_data
+ML_DATA_DIR = REPO_ROOT / "ml_data"
+ML_DATA_RAW = ML_DATA_DIR / "data" / "raw"
+ML_DATA_PROCESSED = ML_DATA_DIR / "data" / "processed"
+ML_DATA_PREDICTED = ML_DATA_DIR / "data" / "predicted"
+ML_MODELS_DIR = ML_DATA_DIR / "models"
+
+# Добавить ml_data в PYTHONPATH чтобы import ml_data.* работал
+import sys
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+# ════════════════════════════════
 
 ROOT_URLCONF = "core.urls"
 
@@ -75,6 +93,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "ru-ru"
+DEFAULT_CHARSET = "utf-8"
 TIME_ZONE = "Asia/Vladivostok"
 USE_I18N = True
 USE_TZ = True

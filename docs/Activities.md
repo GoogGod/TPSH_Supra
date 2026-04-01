@@ -1,207 +1,274 @@
-
 ---
 
-# Activities.md
+## Activities.md
 
 ```markdown
 # Инвентаризация Activities — Supra
 
-Полный список сервисных функций (activities), сгруппированный по модулям из `backend/`.
-Каждая activity — атомарная операция бизнес-логики, вызываемая из views или management-команд.
+Полный список сервисных функций, сгруппированный по модулям.
 
 ---
 
-## Процессы системы (Workflows)
+## Процессы системы
 
-Верхнеуровневые процессы, которые оркестрируют вызов activities.
-
-| Код | Процесс | Описание | Триггер |
-|-----|---------|----------|---------|
-| **ПД** | Подача доступности | Сотрудник отмечает периоды готовности к работе на предстоящий период | Действие сотрудника в ЛК |
-| **ФР** | Формирование расписания | Автоматическое составление графика смен на основе прогнозов и доступности | Менеджер (POST `/schedule/generate/`) |
-| **КР** | Корректировка расписания | Ручное перемещение/назначение/снятие сотрудников | Действие менеджера |
-| **ПЗ** | Прогнозирование загрузки | Генерация прогноза потребности в персонале по историческим данным | Вызывается в рамках **ФР** или отдельно |
-| **ОМ** | Обучение модели | Обучение/переобучение прогнозной модели для объекта | `manage.py train_model` / cron |
-| **ОТ** | Оценка точности | Сравнение прогнозов с фактическими данными, контроль порога ≥ 85% | После внесения факта (**СД**) |
-| **СД** | Сбор данных | Фиксация фактической загрузки объекта после завершения смены | `manage.py collect_data` / Менеджер |
-| **РП** | Регистрация персонала | Создание учётной записи сотрудника с привязкой к объекту и роли | Менеджер / Админ |
-
----
-
-## users/services.py — управление пользователями
-
-Операции с учётными записями, ролями, профилями. Все функции принимают валидированные данные (из serializer) и возвращают экземпляры модели или queryset.
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `create_employee` | Создать пользователя с ролью `employee`, привязать к venue. Хеширует пароль, сохраняет. Возвращает `User` | **РП** |
-| `update_profile` | Обновить поля профиля пользователя (имя, телефон, фото). Принимает user + validated_data | **РП** |
-| `assign_role` | Изменить роль пользователя (`employee` → `manager` и т.д.). Проверяет, что вызывающий — admin | **РП** |
-| `get_team_for_venue` | Вернуть queryset сотрудников, привязанных к указанному venue. Поддерживает фильтр по роли | **ФР**, **КР** |
-| `deactivate_user` | Пометить пользователя как неактивного (`is_active=False`). Не удаляет данные | **РП** |
+| Код | Процесс | Триггер |
+|-----|---------|---------|
+| **АВТ** | Аутентификация (login/logout/refresh) | Действие пользователя |
+| **РП** | Регистрация персонала | Менеджер / Админ |
+| **ЗД** | Загрузка данных для ML | Менеджер (POST upload-data) |
+| **МЛ** | ML-пайплайн (обработка → обучение → прогноз) | Менеджер (POST run) / cron |
+| **ГР** | Генерация расписания (OR-Tools) | Менеджер (POST generate-schedule) |
+| **ЗГ** | Загрузка CSV расписания (ручная) | Менеджер (POST upload) |
+| **ПБ** | Публикация расписания | Менеджер (POST publish) |
+| **ЗН** | Занятие позиции сотрудником | Действие сотрудника (POST claim) |
+| **НЗ** | Ручное назначение менеджером | Менеджер (POST assign) |
+| **ПД** | Подтверждение назначения | Сотрудник (POST confirm/reject) |
+| **НП** | Напоминание о расписании | cron (send_schedule_reminders) |
 
 ---
 
-## shifts/services/availability.py — управление доступностью
+## users/views.py — аутентификация и управление пользователями
 
-Обработка периодов доступности, которые сотрудники подают через личный кабинет. Результат используется алгоритмом планирования.
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `submit_availability` | Принять список периодов доступности от сотрудника (дата, время начала, время конца). Валидирует, что периоды не пересекаются и относятся к будущим датам. Сохраняет в БД | **ПД** |
-| `update_availability_period` | Изменить конкретный период доступности. Проверяет владельца. Если расписание на эту дату уже сформировано — возвращает предупреждение | **ПД** |
-| `delete_availability_period` | Удалить период доступности. Если сотрудник уже назначен на смену в этот период — отклонить с ошибкой `ScheduleConflictError` | **ПД** |
-| `get_availability_matrix` | Построить матрицу «сотрудник × дата × временной слот» для указанного venue и диапазона дат. Возвращает структуру, пригодную для алгоритма scheduler | **ФР** |
-| `clear_outdated_availability` | Удалить все периоды доступности с датой в прошлом. Вызывается периодически (cron или при запуске scheduler) | **ФР** |
+| Activity | Описание | WF |
+|----------|----------|----|
+| `TokenObtainPairView` (simplejwt) | username + password → access + refresh токены | **АВТ** |
+| `TokenRefreshView` (simplejwt) | refresh → новый access | **АВТ** |
+| `LogoutView.post` | Добавить refresh в blacklist | **АВТ** |
+| `RegisterView.post` | Валидация данных, хеширование пароля, создание User | **РП** |
+| `MeView.get` | Вернуть профиль `request.user` через `UserSerializer` | **АВТ** |
 
 ---
 
-## shifts/services/scheduler.py — алгоритм составления расписания
+## users/serializers.py — валидация и сериализация
 
-Ядро системы. Автоматическое формирование назначений сотрудников на смены на основе прогнозов и доступности.
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `generate_schedule` | Главная точка входа. Принимает venue и диапазон дат. Последовательно вызывает: получение прогноза (`get_staffing_forecast`), построение матрицы доступности (`get_availability_matrix`), создание/обновление смен (`ensure_shifts_exist`), назначение сотрудников (`assign_employees_to_shifts`), оптимизацию (`optimize_distribution`). Возвращает список `ShiftAssignment` | **ФР** |
-| `ensure_shifts_exist` | Для каждого дня в диапазоне — проверить, что объекты `Shift` созданы (утро/день/вечер или по конфигурации venue). Если нет — создать с `required_staff` из прогноза. Если есть — обновить `required_staff` | **ФР** |
-| `assign_employees_to_shifts` | Для каждой смены — отобрать доступных сотрудников из матрицы, назначить до `required_staff`. Приоритет: равномерность загрузки (у кого меньше смен за неделю — приоритет выше) | **ФР** |
-| `optimize_distribution` | Пост-обработка: выровнять количество смен между сотрудниками за период. Переназначить, если кто-то перегружен, а кто-то недогружен — при наличии альтернативы | **ФР** |
-| `assign_employee_manually` | Менеджер вручную назначает сотрудника на смену. Вызывает `validate_assignment` из `validators.py`. Создаёт `ShiftAssignment` | **КР** |
-| `move_employee` | Менеджер перемещает сотрудника из одной смены в другую. Вызывает `validate_manual_move`. Удаляет старое назначение, создаёт новое | **КР** |
-| `unassign_employee` | Снять сотрудника со смены. Обновляет статус `ShiftAssignment` → `cancelled`. Если смена остаётся недоукомплектованной — записывает предупреждение | **КР** |
+| Activity | Описание | WF |
+|----------|----------|----|
+| `RegisterSerializer.validate` | Проверить совпадение паролей | **РП** |
+| `RegisterSerializer.create` | `set_password()`, сохранение User | **РП** |
+| `UserSerializer` | Read-only сериализация с `venue_name` | **АВТ**, **РП** |
 
 ---
 
-## shifts/services/validators.py — валидация смен и назначений
+## users/permissions.py — права доступа
 
-Проверки бизнес-правил. Каждый валидатор поднимает исключение из `common/exceptions.py` при нарушении.
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `validate_assignment` | Проверить, что сотрудник: (1) доступен в данный период, (2) не назначен на другую пересекающуюся смену, (3) не превысит лимит часов за неделю | **ФР**, **КР** |
-| `validate_manual_move` | Проверить, что целевая смена: (1) не укомплектована полностью, (2) сотрудник доступен во время целевой смены, (3) перемещение не создаёт конфликт отдыха | **КР** |
-| `check_rest_between_shifts` | Проверить минимальный разрыв между окончанием предыдущей смены и началом следующей для данного сотрудника (≥ 8 ч, конфигурируемо) | **ФР**, **КР** |
-| `check_weekly_hours_limit` | Подсчитать суммарные часы сотрудника за неделю. Если назначение превысит лимит (40 ч по умолчанию, конфигурируемо) — вернуть `OvertimeLimitError` | **ФР**, **КР** |
-| `detect_conflicts_in_schedule` | Пройти по всему сформированному расписанию и вернуть список конфликтов (пересечения, дефицит персонала, переработки). Не поднимает исключений — возвращает отчёт | **ФР** |
+| Activity | Описание | WF |
+|----------|----------|----|
+| `IsEmployee.has_permission` | Любой авторизованный | Все |
+| `IsManager.has_permission` | role ∈ {manager, admin} | **РП**, **ГР**, **НЗ**, **ПБ** |
+| `IsAdmin.has_permission` | role == admin | Управление venues, users |
+| `IsOwnerOrManager.has_object_permission` | Владелец объекта ИЛИ менеджер | **ЗН**, **ПД** |
 
 ---
 
-## forecasting/services/collector.py — сбор и подготовка данных
+## shifts/services/csv_parser.py — парсинг CSV расписания
 
-Операции с историческими данными загрузки. Данные — основа для обучения и прогнозирования.
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `record_actual_load` | Записать фактические данные загрузки за дату: venue, date, guest_count, revenue (опционально), event_flag (праздник/мероприятие). Проверяет дубликаты | **СД** |
-| `import_historical_csv` | Импорт исторических данных из CSV-файла. Парсит, валидирует, записывает массово (`bulk_create`). Для начальной загрузки данных | **СД** |
-| `build_feature_matrix` | Сформировать DataFrame с признаками для модели: day_of_week, month, is_weekend, is_holiday, week_number, lag_features (загрузка за -1, -7 дней), rolling_mean_7d. Возвращает `pd.DataFrame` | **ОМ**, **ПЗ** |
-| `get_load_history` | Вернуть queryset `HistoricalLoad` для venue за указанный период. Для отображения в интерфейсе менеджера и для сервисов predictor/evaluator | **ОМ**, **ПЗ**, **ОТ** |
-| `detect_anomalies` | Определить аномальные значения в исторических данных (IQR-метод). Пометить, но не удалять — менеджер решает, учитывать ли их | **ОМ** |
-| `enrich_with_calendar` | Дополнить данные признаками из календаря: государственные праздники, школьные каникулы, локальные события (если заданы в venue config) | **ОМ** |
+| Activity | Описание | WF |
+|----------|----------|----|
+| `normalize_column_names` | Привести имена колонок к стандарту через `COLUMN_ALIASES` | **ЗГ**, **ГР** |
+| `parse_schedule_csv` | CSV → MonthlySchedule + WaiterSlots + ScheduleEntries (в транзакции) | **ЗГ**, **ГР** |
+| `_parse_row` | Парсинг одной строки: дата, тип смены, время, часы | **ЗГ**, **ГР** |
+| `_parse_time` | Строка → `datetime.time` или `None` | **ЗГ**, **ГР** |
 
 ---
 
-## forecasting/services/predictor.py — прогнозирование
+## shifts/views.py — расписания и слоты
 
-Обучение моделей и генерация прогнозов загрузки. Основной алгоритм — SARIMA (`statsmodels`), резервный — GradientBoosting (`scikit-learn`).
-
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `train_model` | Обучить прогнозную модель для venue. Шаги: (1) `build_feature_matrix`, (2) разделение train/test, (3) подбор параметров SARIMA (`auto_arima` логика) или обучение GradientBoosting, (4) оценка на тесте, (5) сохранение параметров и метрик в `ModelMetadata`. Порог: если accuracy < 85% — логировать предупреждение | **ОМ** |
-| `predict_load` | Сгенерировать прогноз загрузки для venue на указанную дату. Загружает обученную модель из `ModelMetadata`, формирует признаки, возвращает `predicted_load` и `confidence_interval` | **ПЗ** |
-| `predict_load_range` | Прогноз загрузки для venue на диапазон дат. Вызывает `predict_load` для каждой даты. Возвращает список прогнозов | **ПЗ**, **ФР** |
-| `get_staffing_forecast` | Конвертировать прогноз загрузки в рекомендуемое количество персонала. Использует коэффициент `guests_per_waiter` из конфигурации venue (например, 1 официант на 4-6 столов). Возвращает dict `{date: {shift_type: required_staff}}` | **ФР** |
-| `select_best_model` | Сравнить SARIMA и GradientBoosting на тестовой выборке venue. Выбрать модель с лучшей метрикой MAE. Записать в `ModelMetadata.algorithm` | **ОМ** |
+| Activity | Описание | WF |
+|----------|----------|----|
+| `UploadScheduleView.post` | Принять CSV файл + venue_id, вызвать `parse_schedule_csv` | **ЗГ** |
+| `MonthlyScheduleListView.get_queryset` | Список расписаний (employee — только published своего venue) | — |
+| `MonthlyScheduleDetailView.get` | Детали + prefetch слотов и записей | — |
+| `PublishScheduleView.post` | draft → published, вызвать `notify_schedule_published` | **ПБ** |
+| `DeleteScheduleView.delete` | Удалить черновик (нельзя удалить published) | — |
+| `ClaimSlotView.post` | Сотрудник занимает open слот: проверки (venue, статус, дубль) → confirmed, `notify_slot_claimed` | **ЗН** |
+| `AssignSlotView.post` | Менеджер назначает: проверки → pending, `notify_manual_assignment` | **НЗ** |
+| `UnassignSlotView.post` | Менеджер снимает: → open, обнуление полей | **НЗ** |
 
 ---
 
-## forecasting/services/evaluator.py — оценка точности
+## shifts/management/commands/send_schedule_reminders.py
 
-Мониторинг качества прогнозов. Контроль порога ≥ 85%.
+| Activity | Описание | WF |
+|----------|----------|----|
+| `Command.handle` | Проверить: последняя неделя? → для каждого venue без published расписания на следующий месяц → `notify_schedule_reminder` | **НП** |
 
-| Activity | Описание | Используется в WF |
-|----------|----------|--------------------|
-| `evaluate_accuracy` | Сравнить прогнозы (`Forecast`) с фактическими данными (`HistoricalLoad`) за указанный период. Рассчитать метрики: MAE, RMSE, MAPE, accuracy (% дней, где отклонение ≤ 15%). Вернуть dict с метриками | **ОТ** |
-| `compare_prediction_vs_actual` | Для одной конкретной даты: вернуть `{predicted, actual, deviation_abs, deviation_pct}`. Используется для детального просмотра менеджером | **ОТ** |
-| `get_model_metrics` | Вернуть текущие метрики модели для venue из `ModelMetadata` + оценку на последних N днях. Для эндпоинта `/forecast/accuracy/` | **ОТ** |
-| `check_retraining_needed` | Проверить, не деградировала ли модель: если accuracy за последние 14 дней < 85% — вернуть `True` и рекомендацию к переобучению | **ОТ** |
-| `log_forecast_result` | После завершения дня — записать пару (прогноз, факт) для накопления статистики. Вызывается при внесении фактических данных через `record_actual_load` | **ОТ**, **СД** |
+---
+
+## forecasting/services/ml_runner.py — обёртка ML
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `MLRunner.__init__` | Сохранить `cwd` и `sys.path` для восстановления | **МЛ** |
+| `MLRunner.execute` | Добавить `ml_data/` в `sys.path`, `chdir`, вызвать `ml_main(**kwargs)`, извлечь метрики, восстановить состояние | **МЛ** |
+| `MLRunner._update_status` | Обновить `ForecastRun.status` | **МЛ** |
+| `MLRunner._extract_metrics` | Из результата `main()` (dict) или fallback из `.pkl` | **МЛ** |
+| `MLRunner._load_metrics_from_model` | `joblib.load(model_orders.pkl)` → извлечь accuracy/mae/r2 с нормализацией имён | **МЛ** |
+
+---
+
+## forecasting/services/forecast_loader.py — CSV → БД
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `load_forecast_to_db` | Прочитать `forecast.csv`, удалить старые записи run, `bulk_create` HourlyForecast | **МЛ** |
+| `_read_forecast_csv` | Определить delimiter, парсить построчно | **МЛ** |
+| `_parse_forecast_row` | Одна строка → dict с типизацией | **МЛ** |
+
+---
+
+## forecasting/services/schedule_generator.py — scheduler → расписание
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `run_scheduler` | `chdir(ml_data)`, импорт `scheduler.main()` с fallback на `create_waiter_schedule()`, восстановить `cwd` | **ГР** |
+| `load_generated_schedule` | Прочитать `waiter_schedule.csv`, вызвать `parse_schedule_csv` | **ГР** |
+| `generate_schedule_full` | `run_scheduler()` → `load_generated_schedule()` → dict с результатами | **ГР** |
+
+---
+
+## forecasting/views.py — API прогнозирования
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `RunForecastView.post` | Создать ForecastRun, запустить MLRunner, загрузить прогнозы в БД | **МЛ** |
+| `ForecastRunListView.get_queryset` | Список запусков (менеджер — свой venue, admin — все) | — |
+| `ForecastRunDetailView.get` | Детали одного запуска | — |
+| `HourlyForecastView.get_queryset` | Почасовой прогноз с фильтрами (venue, date_from, date_to, run_id) | — |
+| `DailyForecastView.get` | Агрегация по дням: Sum orders, guests; filter morning/evening | — |
+| `ModelAccuracyView.get` | Последний run с train_model=True и accuracy_pct | — |
+| `GenerateScheduleView.post` | Проверить наличие прогноза → `generate_schedule_full` | **ГР** |
+| `UploadRawDataView.post` | Сохранить файл (csv/xlsx/xls) в `ml_data/data/raw/` | **ЗД** |
+
+---
+
+## user_notifications/services.py — создание уведомлений
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `notify_schedule_published` | Всем employee venue: «Новое расписание на {месяц}» | **ПБ** |
+| `notify_slot_claimed` | Всем manager venue: «{Имя} занял позицию Официант {N}» | **ЗН** |
+| `notify_manual_assignment` | Одному employee: «Вас назначили на Официант {N}. Подтвердите.» (requires_confirmation) | **НЗ** |
+| `notify_assignment_response` | Всем manager venue: «{Имя} подтвердил/отклонил назначение» | **ПД** |
+| `notify_schedule_reminder` | Всем manager venue: «Расписание на {месяц} не опубликовано» | **НП** |
+
+---
+
+## user_notifications/views.py — API уведомлений
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `NotificationListView.get_queryset` | Уведомления текущего пользователя (новые первые) | — |
+| `UnreadCountView.get` | `count(is_read=False)` | — |
+| `MarkReadView.post` | `is_read = True` для одного уведомления | — |
+| `MarkAllReadView.post` | `update(is_read=True)` для всех | — |
+| `ConfirmAssignmentView.post` | `confirmation_status = accepted`, slot → confirmed, `notify_assignment_response(True)` | **ПД** |
+| `RejectAssignmentView.post` | `confirmation_status = rejected`, slot → open, `notify_assignment_response(False)` | **ПД** |
+
+---
+
+## ml_data/main.py — ML-пайплайн
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `main(process_data, train_model, make_forecast, evaluate, ...)` | Оркестратор: последовательно вызывает этапы, возвращает dict с метриками | **МЛ** |
+| Этап process_data | `process_raw_data()`: Excel/CSV → `processed_orders.csv` | **МЛ** |
+| Этап train_model | Обучение XGBoost/RandomForest → `model_orders.pkl` | **МЛ** |
+| Этап make_forecast | Генерация почасового прогноза → `forecast.csv` | **МЛ** |
+| Этап evaluate | Метрики на тесте: MAE, R², accuracy% | **МЛ** |
+
+---
+
+## ml_data/scheduler.py — генерация расписания
+
+| Activity | Описание | WF |
+|----------|----------|----|
+| `main(forecast_path, output_path, ...)` | Читает `forecast.csv`, запускает OR-Tools оптимизацию, записывает `waiter_schedule.csv` | **ГР** |
+| `create_waiter_schedule(...)` | Fallback: альтернативная точка входа | **ГР** |
 
 ---
 
 ## Сводная карта: процесс → activities
+АВТ Аутентификация
+└─ TokenObtainPairView (login)
+└─ TokenRefreshView (refresh)
+└─ LogoutView.post (blacklist)
+└─ MeView.get (профиль)
 
 РП Регистрация персонала
-└─ users/services.create_employee
-└─ users/services.assign_role
+└─ RegisterView.post
+└─ RegisterSerializer.validate → .create
+└─ IsManager (проверка прав)
 
-ПД Подача доступности
-└─ shifts/services/availability.submit_availability
-└─ shifts/services/availability.update_availability_period
-└─ shifts/services/availability.delete_availability_period
+ЗД Загрузка данных
+└─ UploadRawDataView.post → ml_data/data/raw/
 
-СД Сбор данных
-└─ forecasting/services/collector.record_actual_load
-└─ forecasting/services/collector.import_historical_csv
-└─ forecasting/services/evaluator.log_forecast_result
+МЛ ML-пайплайн
+└─ RunForecastView.post
+└─ MLRunner.execute
+└─ ml_data.main.main(**kwargs)
+└─ process_raw_data (если process_data=True)
+└─ train (если train_model=True)
+└─ predict (если make_forecast=True)
+└─ evaluate (если evaluate=True)
+└─ MLRunner._extract_metrics
+└─ forecast_loader.load_forecast_to_db → HourlyForecast
 
-ОМ Обучение модели
-└─ forecasting/services/collector.build_feature_matrix
-└─ forecasting/services/collector.enrich_with_calendar
-└─ forecasting/services/collector.detect_anomalies
-└─ forecasting/services/predictor.train_model
-└─ forecasting/services/predictor.select_best_model
+ГР Генерация расписания
+└─ GenerateScheduleView.post
+└─ schedule_generator.run_scheduler
+└─ ml_data.scheduler.main()
+└─ schedule_generator.load_generated_schedule
+└─ csv_parser.parse_schedule_csv → MonthlySchedule (draft)
 
-ПЗ Прогнозирование загрузки
-└─ forecasting/services/collector.build_feature_matrix
-└─ forecasting/services/predictor.predict_load_range
-└─ forecasting/services/predictor.get_staffing_forecast
+ЗГ Загрузка CSV (ручная)
+└─ UploadScheduleView.post
+└─ csv_parser.parse_schedule_csv → MonthlySchedule (draft)
 
-ФР Формирование расписания
-└─ forecasting/services/predictor.get_staffing_forecast ← из ПЗ
-└─ shifts/services/availability.get_availability_matrix
-└─ shifts/services/availability.clear_outdated_availability
-└─ shifts/services/scheduler.ensure_shifts_exist
-└─ shifts/services/scheduler.assign_employees_to_shifts
-└─ shifts/services/validators.validate_assignment
-└─ shifts/services/validators.check_rest_between_shifts
-└─ shifts/services/validators.check_weekly_hours_limit
-└─ shifts/services/scheduler.optimize_distribution
-└─ shifts/services/validators.detect_conflicts_in_schedule
+ПБ Публикация расписания
+└─ PublishScheduleView.post
+└─ notify_schedule_published → Notification (всем employee)
 
-КР Корректировка расписания
-└─ shifts/services/scheduler.assign_employee_manually
-└─ shifts/services/scheduler.move_employee
-└─ shifts/services/scheduler.unassign_employee
-└─ shifts/services/validators.validate_assignment
-└─ shifts/services/validators.validate_manual_move
-└─ shifts/services/validators.check_rest_between_shifts
-└─ shifts/services/validators.check_weekly_hours_limit
+ЗН Занятие позиции
+└─ ClaimSlotView.post
+└─ проверки: published? venue? open? не занял другой?
+└─ slot → confirmed
+└─ notify_slot_claimed → Notification (всем manager)
 
-ОТ Оценка точности
-└─ forecasting/services/evaluator.evaluate_accuracy
-└─ forecasting/services/evaluator.compare_prediction_vs_actual
-└─ forecasting/services/evaluator.get_model_metrics
-└─ forecasting/services/evaluator.check_retraining_needed
+НЗ Ручное назначение
+└─ AssignSlotView.post
+└─ проверки: open? venue? не назначен?
+└─ slot → pending
+└─ notify_manual_assignment → Notification (employee, requires_confirmation)
+
+ПД Подтверждение назначения
+└─ ConfirmAssignmentView.post
+└─ notification → accepted, slot → confirmed
+└─ notify_assignment_response(True) → Notification (всем manager)
+ИЛИ
+└─ RejectAssignmentView.post
+└─ notification → rejected, slot → open
+└─ notify_assignment_response(False) → Notification (всем manager)
+
+НП Напоминание
+└─ send_schedule_reminders (management command)
+└─ для каждого venue без published на следующий месяц
+└─ notify_schedule_reminder → Notification (всем manager)
 
 ---
 
 ## Зависимости между модулями
+users ──── (нет зависимостей)
 
-users/services ──────────────────────── (нет зависимостей от других сервисов)
+shifts/views ──┬─ shifts/services/csv_parser (парсинг CSV)
+└─ user_notifications/services (уведомления при publish/claim/assign)
 
-shifts/services/availability ────────── (нет зависимостей от других сервисов)
+forecasting/views ──┬─ forecasting/services/ml_runner (запуск ML)
+├─ forecasting/services/forecast_loader (CSV → БД)
+└─ forecasting/services/schedule_generator ──┬─ ml_data/scheduler (OR-Tools)
+└─ shifts/services/csv_parser
 
-shifts/services/validators ──────────── shifts.models (Shift, ShiftAssignment, Availability)
+user_notifications ──── (нет зависимостей от других сервисов)
 
-shifts/services/scheduler ───────────┬─ shifts/services/availability (матрица доступности)
-├─ shifts/services/validators (валидация назначений)
-└─ forecasting/services/predictor (прогноз потребности)
+ml_data ──── (изолирован, вызывается через import)
 
-forecasting/services/collector ──────── (нет зависимостей от других сервисов)
-
-forecasting/services/predictor ──────── forecasting/services/collector (feature matrix)
-
-forecasting/services/evaluator ──────── forecasting/services/collector (исторические данные)
-
-> Зависимости — однонаправленные. `users` и `forecasting` не знают друг о друге. `shifts/scheduler` — единственный модуль, зависящий от `forecasting`. Циклических зависимостей нет.
+> Зависимости однонаправленные. `users` и `user_notifications` не знают друг о друге. `ml_data` не знает о Django. Циклических зависимостей нет.

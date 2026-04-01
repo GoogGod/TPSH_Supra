@@ -1,0 +1,51 @@
+Планируемые API-эндпоинты
+Аутентификация — /api/v1/auth/
+Метод	Путь	Описание	Доступ
+POST	/login/	Войти (username + password → access + refresh)	Все
+POST	/token/refresh/	Обновить access по refresh	Все
+POST	/logout/	Инвалидировать refresh (blacklist)	Авторизованные
+POST	/register/	Создать сотрудника	Manager, Admin
+Пользователи — /api/v1/users/
+Метод	Путь	Описание	Доступ
+GET	/me/	Профиль текущего пользователя	Авторизованные
+PATCH	/me/	Обновить свой профиль	Авторизованные
+GET	/	Список сотрудников объекта	Manager, Admin
+GET	/{id}/	Детали сотрудника	Manager, Admin
+PATCH	/{id}/	Изменить роль/venue/статус	Admin
+Venues — /api/v1/venues/
+Метод	Путь	Описание	Доступ
+GET	/	Список активных объектов	Manager, Admin
+POST	/	Создать объект	Admin
+PATCH	/{id}/	Обновить объект	Admin
+Расписание — /api/v1/schedule/
+Метод	Путь	Описание	Доступ
+POST	/upload/	Загрузить CSV расписания	Manager, Admin
+GET	/monthly/	Список расписаний	Авторизованные
+GET	/monthly/{id}/	Детали + слоты + дни	Авторизованные
+POST	/monthly/{id}/publish/	Опубликовать черновик	Manager, Admin
+DELETE	/monthly/{id}/delete/	Удалить черновик	Manager, Admin
+POST	/slots/{id}/claim/	Сотрудник занимает позицию	Employee
+POST	/slots/{id}/assign/	Менеджер назначает (с подтверждением)	Manager, Admin
+POST	/slots/{id}/unassign/	Менеджер снимает	Manager, Admin
+Прогнозирование — /api/v1/forecast/
+Метод	Путь	Описание	Доступ
+POST	/run/	Запустить ML-пайплайн	Manager, Admin
+GET	/runs/	История запусков	Manager, Admin
+GET	/runs/{id}/	Детали запуска + метрики	Manager, Admin
+GET	/hourly/	Почасовой прогноз	Manager, Admin
+GET	/daily/	Дневной агрегат	Manager, Admin
+GET	/accuracy/	Метрики точности модели	Manager, Admin
+POST	/generate-schedule/	scheduler → MonthlySchedule	Manager, Admin
+POST	/upload-data/	Загрузить Excel/CSV для обучения	Manager, Admin
+Уведомления — /api/v1/notifications/
+Метод	Путь	Описание	Доступ
+GET	/	Мои уведомления	Авторизованные
+GET	/unread-count/	Количество непрочитанных	Авторизованные
+POST	/read-all/	Прочитать все	Авторизованные
+POST	/{id}/read/	Прочитать одно	Авторизованные
+POST	/{id}/confirm/	Подтвердить назначение	Авторизованные
+POST	/{id}/reject/	Отклонить назначение	Авторизованные
+Документация
+Метод	Путь	Описание
+GET	/api/v1/schema/	OpenAPI JSON
+GET	/api/v1/docs/	Swagger UI

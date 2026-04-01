@@ -25,6 +25,9 @@ urlpatterns = [
     # Shifts + Schedule + Venues
     path("api/v1/", include("shifts.urls")),
 
+    # Forecasting
+    path("api/v1/", include("forecasting.urls")),
+    
     # Notifications
     path("api/v1/", include("user_notifications.urls")),
 
