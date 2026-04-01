@@ -21,6 +21,9 @@
           <button class="side-menu-item" @click="goToSchedule">
             Расписание
           </button>
+          <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
+  Выйти
+</button>
         </div>
       </aside>
     </transition>
@@ -170,7 +173,7 @@
 <script>
 import '../assets/cabinet.css'
 import api from '../api'
-import { fetchCurrentUser } from '../services/auth'
+import { fetchCurrentUser, logoutUser } from '../services/auth'
 
 const getDefaultCreateRoleForm = () => ({
   username: '',
@@ -255,6 +258,11 @@ export default {
     }
   },
   methods: {
+    handleLogout() {
+  this.menuOpen = false
+  logoutUser()
+  this.$router.replace('/login')
+},
     openMenu() {
       this.menuOpen = true
     },

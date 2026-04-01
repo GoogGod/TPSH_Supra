@@ -35,10 +35,11 @@ export const setCurrentUser = (user) => {
 }
 
 export const clearAuthData = () => {
-  localStorage.removeItem('access')
-  localStorage.removeItem('refresh')
-  localStorage.removeItem('user')
-  localStorage.removeItem('isAuthenticated')
+  localStorage.clear()
+}
+
+export const logoutUser = () => {
+  clearAuthData()
 }
 
 export const fetchCurrentUser = async () => {

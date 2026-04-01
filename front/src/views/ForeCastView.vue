@@ -14,14 +14,17 @@
           <button class="side-menu-close" @click="closeMenu">✕</button>
         </div>
 
-        <div class="side-menu-section">
-          <button class="side-menu-item" @click="goToProfile">
-            Профиль
-          </button>
-          <button class="side-menu-item active" @click="closeMenu">
-            Расписание
-          </button>
-        </div>
+<div class="side-menu-section">
+  <button class="side-menu-item" @click="goToProfile">
+    Профиль
+  </button>
+  <button class="side-menu-item active" @click="closeMenu">
+    Расписание
+  </button>
+  <button class="side-menu-item side-menu-item-danger" @click="handleLogout">
+    Выйти
+  </button>
+</div>
       </aside>
     </transition>
 
@@ -163,7 +166,7 @@
 
 <script>
 import '../assets/forecast.css'
-import { fetchCurrentUser } from '../services/auth'
+import { fetchCurrentUser, logoutUser } from '../services/auth'
 
 const WAITER_COLORS = [
   '#f06292',
@@ -301,6 +304,11 @@ data() {
   },
 
   methods: {
+    handleLogout() {
+  this.menuOpen = false
+  logoutUser()
+  this.$router.replace('/login')
+},
     openMenu() {
       this.menuOpen = true
     },
