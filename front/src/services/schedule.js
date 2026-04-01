@@ -33,7 +33,8 @@ const buildMonthRange = (monthDate = new Date()) => {
   const lastDayOfMonth = new Date(nextMonth.getTime() - 24 * 60 * 60 * 1000)
 
   return {
-    month: `${currentMonth.getFullYear()}-${padNumber(currentMonth.getMonth() + 1)}`,
+    month: currentMonth.getMonth() + 1,
+    monthKey: `${currentMonth.getFullYear()}-${padNumber(currentMonth.getMonth() + 1)}`,
     year: currentMonth.getFullYear(),
     startDate: formatDate(currentMonth),
     endDate: formatDate(lastDayOfMonth)
@@ -137,11 +138,9 @@ const normalizeEmployeeKey = (item, employee) => {
   const raw = firstDefined(
     item.employee_key,
     item.employee_id,
+    item.assigned_employee,
     item.waiter_id,
-    item.waiter_num,
     employee.employee_key,
-    employee.waiter_num,
-    employee.employee_number,
     employee.id,
     employee.username,
     employee.email
@@ -151,6 +150,14 @@ const normalizeEmployeeKey = (item, employee) => {
 }
 
 const buildEmployeeLabel = (item, employee, employeeKey) => {
+  if (item.employee_label) {
+    return item.employee_label
+  }
+
+  if (item.employee_name) {
+    return item.employee_name
+  }
+
   const fullName = [employee.first_name, employee.last_name].filter(Boolean).join(' ').trim()
   if (fullName) {
     return fullName
@@ -248,6 +255,12 @@ const normalizeScheduleEntry = (item, fallbackDate = '') => {
   const status = String(
     firstDefined(item.status, item.assignment_status, item.slot_status, shift.status, '')
   ).toLowerCase()
+  const rawIsWorking = firstDefined(item.is_working, shift.is_working)
+  const isWorkingValue =
+    typeof rawIsWorking === 'boolean'
+      ? rawIsWorking
+      : String(rawIsWorking || '').toLowerCase() === 'true'
+  const isWorking = isWorkingValue && !INACTIVE_STATUSES.has(status)
 
   if (!date) {
     return null
@@ -268,7 +281,8 @@ const normalizeScheduleEntry = (item, fallbackDate = '') => {
     work_start: workStart,
     work_end: workEnd,
     work_hours: Number.isFinite(numericHours) ? numericHours : null,
-    is_working: Boolean(employeeKey) && !INACTIVE_STATUSES.has(status)
+    is_working: isWorking,
+    assignment_status: status || null
   }
 }
 
@@ -300,6 +314,20 @@ const flattenMonthlyDetail = (payload) => {
   }
 
   const directItems = extractList(payload, DETAIL_LIST_KEYS)
+  const slotEntryItems = asArray(payload.slots).flatMap((slot) =>
+    asArray(slot?.entries).map((entry) => ({
+      ...slot,
+      ...entry,
+      employee_id: firstDefined(entry?.employee_id, slot?.employee_id, slot?.assigned_employee),
+      employee_label: firstDefined(
+        entry?.employee_label,
+        slot?.employee_label,
+        slot?.employee_name
+      ),
+      assignment_status: firstDefined(entry?.assignment_status, slot?.assignment_status),
+      waiter_num: firstDefined(entry?.waiter_num, slot?.waiter_num)
+    }))
+  )
   const dayItems = asArray(payload.days).flatMap((day) =>
     asArray(day?.slots).map((slot) => ({
       ...slot,
@@ -307,7 +335,7 @@ const flattenMonthlyDetail = (payload) => {
     }))
   )
 
-  return [...directItems, ...dayItems]
+  return [...slotEntryItems, ...dayItems, ...directItems]
 }
 
 const normalizeMonthlyDetail = (payload) => {
@@ -326,27 +354,48 @@ const normalizeMonthlyDetail = (payload) => {
 const extractScheduleId = (schedule) =>
   firstDefined(schedule.id, schedule.schedule_id, schedule.monthly_schedule_id)
 
+const extractSchedulePeriod = (schedule) => {
+  const explicitYear = Number(firstDefined(schedule?.year, schedule?.schedule_year))
+  const explicitMonth = Number(firstDefined(schedule?.month, schedule?.schedule_month))
+
+  if (Number.isInteger(explicitYear) && Number.isInteger(explicitMonth)) {
+    return {
+      year: explicitYear,
+      month: explicitMonth
+    }
+  }
+
+  const rawPeriod = String(
+    firstDefined(schedule?.period, schedule?.start_date, schedule?.date, '')
+  )
+  const matchedPeriod = rawPeriod.match(/^(\d{4})-(\d{2})/)
+
+  if (!matchedPeriod) {
+    return {
+      year: null,
+      month: null
+    }
+  }
+
+  return {
+    year: Number(matchedPeriod[1]),
+    month: Number(matchedPeriod[2])
+  }
+}
+
 const pickMonthlySchedule = (schedules, monthDate) => {
   if (!Array.isArray(schedules) || schedules.length === 0) {
     return null
   }
 
-  const targetMonth = `${monthDate.getFullYear()}-${padNumber(monthDate.getMonth() + 1)}`
+  const targetYear = monthDate.getFullYear()
+  const targetMonth = monthDate.getMonth() + 1
 
   const scoredSchedules = schedules
     .map((schedule, index) => {
-      const rawMonth = String(
-        firstDefined(
-          schedule.month,
-          schedule.schedule_month,
-          schedule.period,
-          schedule.start_date,
-          schedule.date,
-          ''
-        )
-      )
+      const { year, month } = extractSchedulePeriod(schedule)
       const status = String(schedule.status || '').toLowerCase()
-      const monthMatches = rawMonth.startsWith(targetMonth)
+      const monthMatches = year === targetYear && month === targetMonth
       const score =
         (monthMatches ? 100 : 0) +
         (status === 'published' ? 20 : 0) +
@@ -392,7 +441,12 @@ const extractErrorMessage = (error, fallbackMessage) => {
   }
 
   if (typeof data === 'string') {
-    return data
+    const trimmed = data.trim()
+    if (trimmed.startsWith('<!DOCTYPE html') || trimmed.startsWith('<html')) {
+      return fallbackMessage
+    }
+
+    return trimmed || fallbackMessage
   }
 
   if (data.detail) {

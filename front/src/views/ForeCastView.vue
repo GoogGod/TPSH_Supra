@@ -130,74 +130,85 @@
                 </div>
               </div>
             </div>
+          </div>
 
-            <div class="waiter-legend">
-              <div
-                v-for="waiter in waiters"
-                :key="waiter.employee_key"
-                class="legend-item"
-                :class="{ active: waiter.employee_key === selectedWaiter }"
-                @click="selectedWaiter = waiter.employee_key"
-              >
-                <span
-                  class="legend-color"
-                  :style="{ backgroundColor: waiter.color }"
-                ></span>
-                <span class="legend-text">{{ waiter.label }}</span>
-              </div>
-            </div>
-
-            <div class="calendar-card">
-              <div class="calendar-weekdays">
-                <div
-                  v-for="weekday in weekdays"
-                  :key="weekday"
-                  class="weekday-cell"
-                >
-                  {{ weekday }}
-                </div>
-              </div>
-
-              <div class="calendar-grid">
-                <div
-                  v-for="day in calendarDays"
-                  :key="day.key"
-                  class="calendar-cell"
-                  :class="{
-                    'outside-month': !day.isCurrentMonth,
-                    'is-working': !!day.shift,
-                    'is-today': day.isToday
-                  }"
-                  :style="getDayStyle(day)"
-                >
-                  <div class="day-number">{{ day.date.getDate() }}</div>
-
-                  <template v-if="day.shift">
-                    <div class="shift-badge">
-                      {{ getShiftLabel(day.shift.shift_type) }}
-                    </div>
-
-                    <div
-                      v-if="day.shift.work_start && day.shift.work_end"
-                      class="shift-time"
-                    >
-                      {{ day.shift.work_start }}–{{ day.shift.work_end }}
-                    </div>
-
-                    <div v-else-if="day.shift.work_hours" class="shift-time">
-                      {{ day.shift.work_hours }} ч
-                    </div>
-                  </template>
-                </div>
-              </div>
+          <div v-if="waiters.length > 0" class="waiter-legend">
+            <div
+              v-for="waiter in waiters"
+              :key="waiter.employee_key"
+              class="legend-item"
+              :class="{ active: waiter.employee_key === selectedWaiter }"
+              @click="selectedWaiter = waiter.employee_key"
+            >
+              <span
+                class="legend-color"
+                :style="{ backgroundColor: waiter.color }"
+              ></span>
+              <span class="legend-text">{{ waiter.label }}</span>
             </div>
           </div>
 
           <div v-else class="schedule-status-card">
-            <p class="empty-state-title">Расписание найдено, но назначений пока нет</p>
+            <p class="empty-state-title">Расписание создано, но сотрудники ещё не назначены</p>
             <p class="empty-state-text">
-              Шаблон смен уже есть в базе, но сотрудники на выбранный месяц ещё не назначены.
+              Ниже показаны свободные слоты по дням. Их можно использовать для последующих назначений.
             </p>
+          </div>
+
+          <div class="calendar-card">
+            <div class="calendar-weekdays">
+              <div
+                v-for="weekday in weekdays"
+                :key="weekday"
+                class="weekday-cell"
+              >
+                {{ weekday }}
+              </div>
+            </div>
+
+            <div class="calendar-grid">
+              <div
+                v-for="day in calendarDays"
+                :key="day.key"
+                class="calendar-cell"
+                :class="{
+                  'outside-month': !day.isCurrentMonth,
+                  'is-working': !!day.shift,
+                  'has-open-slots': !day.shift && day.slots.length > 0,
+                  'is-today': day.isToday
+                }"
+                :style="getDayStyle(day)"
+              >
+                <div class="day-number">{{ day.date.getDate() }}</div>
+
+                <template v-if="day.shift">
+                  <div class="shift-badge">
+                    {{ getShiftLabel(day.shift.shift_type) }}
+                  </div>
+
+                  <div
+                    v-if="day.shift.work_start && day.shift.work_end"
+                    class="shift-time"
+                  >
+                    {{ day.shift.work_start }}–{{ day.shift.work_end }}
+                  </div>
+
+                  <div v-else-if="day.shift.work_hours" class="shift-time">
+                    {{ day.shift.work_hours }} ч
+                  </div>
+                </template>
+
+                <template v-else-if="day.slots.length > 0">
+                  <div class="shift-badge open-slot-badge">
+                    {{ getOpenSlotsLabel(day.slots.length) }}
+                  </div>
+
+                  <div class="shift-time">
+                    {{ formatOpenSlots(day.slots) }}
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </template>
       </section>
@@ -288,6 +299,21 @@ export default {
         .filter((item) => item.employee_key === this.selectedWaiter)
         .forEach((item) => {
           map[item.date] = item
+        })
+
+      return map
+    },
+    dailyScheduleMap() {
+      const map = {}
+
+      this.scheduleRaw
+        .filter((item) => item.date && item.is_working === true && !item.employee_key)
+        .forEach((item) => {
+          if (!map[item.date]) {
+            map[item.date] = []
+          }
+
+          map[item.date].push(item)
         })
 
       return map
@@ -456,7 +482,8 @@ export default {
           date.getFullYear() === today.getFullYear() &&
           date.getMonth() === today.getMonth() &&
           date.getDate() === today.getDate(),
-        shift: this.selectedWaiterScheduleMap[key] || null
+        shift: this.selectedWaiterScheduleMap[key] || null,
+        slots: this.dailyScheduleMap[key] || []
       }
     },
     formatDateKey(date) {
@@ -491,8 +518,49 @@ export default {
 
       return map[shiftType] || shiftType || ''
     },
+    getOpenSlotsLabel(count) {
+      if (count === 1) {
+        return '1 слот'
+      }
+
+      if (count >= 2 && count <= 4) {
+        return `${count} слота`
+      }
+
+      return `${count} слотов`
+    },
+    formatOpenSlots(slots) {
+      const preview = slots
+        .slice(0, 2)
+        .map((slot) => {
+          if (slot.work_start && slot.work_end) {
+            return `${slot.work_start}–${slot.work_end}`
+          }
+
+          if (slot.work_hours) {
+            return `${slot.work_hours} ч`
+          }
+
+          return this.getShiftLabel(slot.shift_type)
+        })
+        .filter(Boolean)
+        .join(', ')
+
+      if (slots.length > 2) {
+        return `${preview} и еще ${slots.length - 2}`
+      }
+
+      return preview || 'Без назначений'
+    },
     getDayStyle(day) {
       if (!day.shift) {
+        if (day.slots.length > 0 && this.waiters.length === 0) {
+          return {
+            backgroundColor: 'rgba(73, 209, 125, 0.18)',
+            color: '#ffffff'
+          }
+        }
+
         return {}
       }
 

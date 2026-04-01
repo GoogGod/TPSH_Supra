@@ -273,6 +273,10 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
+.calendar-cell.has-open-slots {
+  box-shadow: inset 0 0 0 1px rgba(73, 209, 125, 0.35);
+}
+
 .day-number {
   font-size: 13px;
   font-weight: 700;
@@ -293,6 +297,10 @@
   font-size: 10px;
   line-height: 1.25;
   font-weight: 600;
+}
+
+.open-slot-badge {
+  background: rgba(73, 209, 125, 0.28);
 }
 
 .side-menu-overlay {
