@@ -150,7 +150,7 @@
               <label class="form-field">
                 <span>Подтверждение пароля *</span>
                 <input
-                  v-model="createRoleForm.password_confirmation"
+                  v-model="createRoleForm.password_confirm"
                   type="password"
                   placeholder="********"
                   minlength="8"
@@ -169,18 +169,28 @@
                 />
               </label>
 
-              <label class="form-field">
-                <span>Роль *</span>
-                <select v-model="createRoleForm.role" :disabled="isCreatingRole">
-                  <option
-                    v-for="option in availableRoleOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
+              <label v-if="isAdmin" class="form-field">
+  <span>Заведение *</span>
+  <select v-model="createRoleForm.venue" :disabled="isCreatingRole">
+    <option value="" disabled>Выберите заведение</option>
+    <option
+      v-for="restaurant in restaurants"
+      :key="restaurant.id"
+      :value="restaurant.id"
+    >
+      {{ restaurant.name }}
+    </option>
+  </select>
+</label>
+
+<label v-else class="form-field">
+  <span>Заведение</span>
+  <input
+    :value="managerVenueName"
+    type="text"
+    disabled
+  />
+</label>
 
 <label class="form-field">
   <span>Заведение</span>
@@ -193,27 +203,7 @@
     :disabled="isCreatingRole"
   />
 </label>
-
-              <label class="form-field">
-                <span>График *</span>
-                <select v-model="createRoleForm.schedule_pattern" :disabled="isCreatingRole">
-                  <option value="4/3">4/3</option>
-                  <option value="4/2">4/2</option>
-                  <option value="3/2">3/2</option>
-                  <option value="2/2">2/2</option>
-                </select>
-              </label>
-
-              <label class="form-field form-field-full">
-                <span>Длительность смены *</span>
-                <select v-model="createRoleForm.shift_duration" :disabled="isCreatingRole">
-                  <option value="8H">8H</option>
-                  <option value="14H">14H</option>
-                  <option value="CUSTOM">CUSTOM</option>
-                </select>
-              </label>
             </div>
-
             <div class="form-actions">
               <button
                 type="button"
@@ -242,12 +232,12 @@ import { fetchCurrentUser, logoutUser } from '../services/auth'
 const getDefaultCreateRoleForm = () => ({
   username: '',
   password: '',
-  password_confirmation: '',
+  password_confirm: '',
   email: '',
   first_name: '',
   last_name: '',
   phone: '',
-  role: 'EMPLOYEE',
+  role: 'employee',
   venue: '',
   schedule_pattern: '4/2',
   shift_duration: '14H'
@@ -281,7 +271,8 @@ export default {
         role: '',
         venue: '',
         schedule_pattern: '',
-        shift_duration: ''
+        shift_duration: '',
+        restaurants: []
       }
     }
   },
@@ -293,6 +284,17 @@ export default {
     const role = String(this.user.role || '').toUpperCase()
     return role === 'MANAGER' || role === 'ADMIN'
     },
+    isAdmin() {
+  return String(this.user.role || '').toUpperCase() === 'ADMIN'
+},
+managerVenueName() {
+  if (!this.user.venue) return 'Не указано'
+  if (typeof this.user.venue === 'object') {
+    return this.user.venue.name || `ID: ${this.user.venue.id}`
+  }
+  const match = this.restaurants.find(item => String(item.id) === String(this.user.venue))
+  return match ? match.name : `ID: ${this.user.venue}`
+},
     roleRu() {
       const role = String(this.user.role || '').toUpperCase()
 
@@ -310,15 +312,15 @@ availableRoleOptions() {
 
   if (role === 'MANAGER') {
     return [
-      { value: 'EMPLOYEE', label: 'Официант / сотрудник' }
+      { value: 'employee', label: 'Официант / сотрудник' }
     ]
   }
 
   if (role === 'ADMIN') {
     return [
-      { value: 'EMPLOYEE', label: 'Официант / сотрудник' },
-      { value: 'MANAGER', label: 'Менеджер' },
-      { value: 'ADMIN', label: 'Администратор' }
+      { value: 'employee', label: 'Официант / сотрудник' },
+      { value: 'manager', label: 'Менеджер' },
+      { value: 'admin', label: 'Администратор' }
     ]
   }
 
@@ -326,25 +328,33 @@ availableRoleOptions() {
 }
 
   },
-  async mounted() {
-    try {
-      const freshUser = await fetchCurrentUser()
-      this.user = freshUser
-      localStorage.setItem('user', JSON.stringify(freshUser))
-    } catch (error) {
-      const savedUser = localStorage.getItem('user')
+async mounted() {
+  try {
+    const freshUser = await fetchCurrentUser()
+    this.user = freshUser
+    localStorage.setItem('user', JSON.stringify(freshUser))
 
-      if (savedUser) {
-        try {
-          this.user = JSON.parse(savedUser)
-        } catch (e) {
-          console.error('Ошибка чтения user из localStorage', e)
-        }
-      } else {
-        console.error('Не удалось получить пользователя с бэка', error)
-      }
+    if (String(this.user.role || '').toUpperCase() === 'ADMIN') {
+      await this.fetchRestaurants()
     }
-  },
+  } catch (error) {
+    const savedUser = localStorage.getItem('user')
+
+    if (savedUser) {
+      try {
+        this.user = JSON.parse(savedUser)
+
+        if (String(this.user.role || '').toUpperCase() === 'ADMIN') {
+          await this.fetchRestaurants()
+        }
+      } catch (e) {
+        console.error('Ошибка чтения user из localStorage', e)
+      }
+    } else {
+      console.error('Не удалось получить пользователя с бэка', error)
+    }
+  }
+},
   methods: {
     openMenu() {
       this.menuOpen = true
@@ -365,6 +375,15 @@ availableRoleOptions() {
       logoutUser()
       this.$router.replace('/login')
     },
+    async fetchRestaurants() {
+  try {
+    const response = await api.get('/restaurants/')
+    this.restaurants = Array.isArray(response.data) ? response.data : []
+  } catch (error) {
+    console.error('Не удалось загрузить список заведений', error)
+    this.restaurants = []
+  }
+},
 openCreateRoleModal() {
   this.createRoleError = ''
   this.createRoleSuccess = ''
@@ -394,7 +413,7 @@ openCreateRoleModal() {
       const payload = {
         username: this.createRoleForm.username,
         password: this.createRoleForm.password,
-        password_confirmation: this.createRoleForm.password_confirmation,
+        password_confirm: this.createRoleForm.password_confirm,
         email: this.createRoleForm.email,
         first_name: this.createRoleForm.first_name,
         last_name: this.createRoleForm.last_name,
@@ -436,7 +455,7 @@ openCreateRoleModal() {
       this.createRoleError = ''
       this.createRoleSuccess = ''
 
-      if (this.createRoleForm.password !== this.createRoleForm.password_confirmation) {
+      if (this.createRoleForm.password !== this.createRoleForm.password_confirm) {
         this.createRoleError = 'Пароли должны совпадать'
         return
       }

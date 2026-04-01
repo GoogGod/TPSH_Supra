@@ -8,4 +8,4 @@ const bootstrap = async () => {
   createApp(App).use(router).mount('#app')
 }
 
-bootstrap()
+bootstrap() 
