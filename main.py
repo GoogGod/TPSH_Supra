@@ -221,7 +221,7 @@ if __name__ == '__main__':
         make_schedule=True,
         incremental_training=False,
         model_type='xgboost',
-        num_waiters=12,
+        num_waiters=10,
         waiter_config=waiter_config,
         verbose=True,
         force_fresh_weather=True,
