@@ -102,8 +102,21 @@ def predict(
     
     df_pred['guests_predicted'] = (df_pred['orders_predicted'] * avg_guests).round().astype(int)
     
-    df_pred['orders_with_buffer'] = (df_pred['orders_predicted'] * 1.25).astype(int)
-    df_pred['guests_with_buffer'] = (df_pred['guests_predicted'] * 1.25).astype(int)
+    df_pred['orders_with_buffer'] = (df_pred['orders_predicted'] * 1.50).astype(int)
+    df_pred['guests_with_buffer'] = (df_pred['guests_predicted'] * 1.50).astype(int)
+    
+    # Дополнительное увеличение для пиковых часов
+    peak_mask = df_pred['is_peak_hour'] == 1
+    weekend_mask = df_pred['is_weekend'] == 1
+
+    # Для пиковых часов в выходные — ещё +20%
+    df_pred.loc[peak_mask & weekend_mask, 'orders_with_buffer'] = (
+        df_pred.loc[peak_mask & weekend_mask, 'orders_with_buffer'] * 1.20
+    ).astype(int)
+
+    df_pred.loc[peak_mask & weekend_mask, 'guests_with_buffer'] = (
+        df_pred.loc[peak_mask & weekend_mask, 'guests_with_buffer'] * 1.20
+    ).astype(int)
     
     night_hours_mask = (df_pred['hour'] < WORKING_HOUR_START) | (df_pred['hour'] >= WORKING_HOUR_END)
     

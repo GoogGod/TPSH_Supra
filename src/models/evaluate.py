@@ -1,245 +1,160 @@
 import pandas as pd
 import numpy as np
+import joblib
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from typing import Dict
-import json
-from pathlib import Path
-from datetime import datetime
-import joblib
+import os
+from src.config import RANDOM_STATE
+from src.data.loader import load_raw_dataset
+from src.data.preprocessor import prepare_features
 
 
 def evaluate_model(
     model_path: str,
     data_path: str,
-    feature_cols: list,
+    feature_cols: list = None,
     target_column: str = 'orders_count',
     test_size: float = 0.2,
     verbose: bool = True
 ) -> Dict:
     if verbose:
-        print("ОЦЕНКА МОДЕЛИ")
+        print("\nЗагружено {} записей".format(0))
     
-    # Загрузка модели
-    model_data = joblib.load(model_path)
-    model = model_data['model']
-    saved_features = model_data.get('feature_cols', feature_cols)
-    avg_guests_per_order = model_data.get('avg_guests_per_order', 2.03)
-    
-    # Загрузка данных
-    df = pd.read_csv(data_path, encoding='utf-8-sig')
-    df['datetime'] = pd.to_datetime(df['datetime'])
-    df = df.sort_values('datetime').reset_index(drop=True)
+    # Загружаем данные
+    df = load_raw_dataset(data_path)
     
     if verbose:
-        print(f"\nЗагружено {len(df)} записей")
+        print(f"Загружено {len(df)} записей")
         print(f"Диапазон: {df['datetime'].min()} — {df['datetime'].max()}")
     
-    # Подготовка признаков
-    df = _prepare_features(df)
+    # Генерируем признаки через prepare_features (как при обучении)
+    df_agg, saved_features = prepare_features(df, verbose=False)
     
-    # Разделение
-    split_idx = int(len(df) * (1 - test_size))
-    df_test = df.iloc[split_idx:]
+    # Загружаем модель
+    model_data = joblib.load(model_path)
+    model = model_data['model']
     
-    X_test = df_test[saved_features]
-    y_test_orders = df_test['orders_count']
-    y_test_guests = df_test['guests_count']
+    # Используем признаки из модели (или переданные)
+    if feature_cols is None:
+        feature_cols = model_data.get('feature_cols', saved_features)
     
-    # Предсказание заказов
-    y_pred_orders = model.predict(X_test)
+    # Проверяем наличие всех признаков
+    missing_features = set(feature_cols) - set(df_agg.columns)
+    if missing_features:
+        if verbose:
+            print(f"  Предупреждение: отсутствуют признаки: {missing_features}")
+        # Добавляем отсутствующие признаки нулями
+        for col in missing_features:
+            df_agg[col] = 0
     
-    # Предсказание гостей через конверсию
-    y_pred_guests = y_pred_orders * avg_guests_per_order
+    # Доступные признаки
+    available_features = [col for col in feature_cols if col in df_agg.columns]
     
-    # Метрики для заказов
-    metrics_orders = _calculate_metrics(y_test_orders, y_pred_orders, 'orders')
+    X = df_agg[available_features]
+    y = df_agg[target_column]
     
-    # Метрики для гостей (через конверсию)
-    metrics_guests = _calculate_metrics(y_test_guests, y_pred_guests, 'guests')
+    # Разделение на train/test (как при обучении)
+    split_idx = int(len(df_agg) * (1 - test_size))
     
-    # Объединение
-    metrics = {
-        **metrics_orders,
-        **metrics_guests,
-        'avg_guests_per_order': avg_guests_per_order,
-        'timestamp': datetime.now().isoformat()
-    }
-    
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
     if verbose:
-        _print_report(metrics)
+        print(f"Train: {len(X_train)}, Test: {len(X_test)}")
+    
+    # Предсказания
+    y_pred_test = model.predict(X_test)
+    y_pred_test_rounded = np.maximum(0, np.round(y_pred_test)).astype(int)
+    
+    y_pred_train = model.predict(X_train)
+    y_pred_train_rounded = np.maximum(0, np.round(y_pred_train)).astype(int)
+    
+    # Конверсия гостей
+    avg_guests = model_data.get('avg_guests_per_order', 2.03)
+    y_guests_pred = (y_pred_test_rounded * avg_guests).round().astype(int)
+    y_guests_actual = (y_test * avg_guests).round().astype(int)
+    
+    # Метрики
+    metrics = {
+        'test_mae': float(mean_absolute_error(y_test, y_pred_test_rounded)),
+        'test_rmse': float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
+        'test_r2': float(r2_score(y_test, y_pred_test)),
+        'train_mae': float(mean_absolute_error(y_train, y_pred_train_rounded)),
+        'train_rmse': float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
+        'train_r2': float(r2_score(y_train, y_pred_train)),
+        'test_mape': float(np.mean(np.abs((y_test - y_pred_test_rounded) / np.maximum(y_test, 1))) * 100),
+        'guests_mae': float(mean_absolute_error(y_guests_actual, y_guests_pred)),
+        'guests_rmse': float(np.sqrt(mean_squared_error(y_guests_actual, y_guests_pred))),
+        'guests_r2': float(r2_score(y_guests_actual, y_guests_pred)),
+        'guests_mape': float(np.mean(np.abs((y_guests_actual - y_guests_pred) / np.maximum(y_guests_actual, 1))) * 100),
+    }
+    
+    # Точность в процентах
+    metrics['accuracy'] = 100 - metrics['test_mape']
+    metrics['accuracy_within_10'] = float((np.abs(y_test - y_pred_test_rounded) <= y_test * 0.10).mean() * 100)
+    metrics['accuracy_within_20'] = float((np.abs(y_test - y_pred_test_rounded) <= y_test * 0.20).mean() * 100)
+    metrics['accuracy_within_30'] = float((np.abs(y_test - y_pred_test_rounded) <= y_test * 0.30).mean() * 100)
+    metrics['accuracy_within_1_order'] = float((np.abs(y_test - y_pred_test_rounded) <= 1).mean() * 100)
+    metrics['accuracy_within_2_orders'] = float((np.abs(y_test - y_pred_test_rounded) <= 2).mean() * 100)
+    
+    metrics['guests_accuracy'] = 100 - metrics['guests_mape']
+    metrics['guests_accuracy_within_1'] = float((np.abs(y_guests_actual - y_guests_pred) <= 1).mean() * 100)
+    metrics['guests_accuracy_within_2'] = float((np.abs(y_guests_actual - y_guests_pred) <= 2).mean() * 100)
+    
+    if verbose:
+        print("\n" + " " * 28 + "МЕТРИКИ МОДЕЛИ")
+        print("\n" + " " * 32 + "ЗАКАЗЫ")
+        print("-" * 70)
+        print(f"{'Метрика':<50} {'Значение':>15}")
+        print("-" * 70)
+        print(f"{'MAE (средняя ошибка)':<50} {metrics['test_mae']:>15.2f}")
+        print(f"{'RMSE (квадратичная ошибка)':<50} {metrics['test_rmse']:>15.2f}")
+        print(f"{'R² (коэф. детерминации)':<50} {metrics['test_r2']:>15.3f}")
+        print(f"{'MAPE (средняя % ошибка)':<50} {metrics['test_mape']:>14.1f}%")
+        print("\nТОЧНОСТЬ В ПРОЦЕНТАХ:")
+        print(f"{'Общая точность (100% - MAPE)':<50} {metrics['accuracy']:>14.1f}%")
+        print(f"{'Точность в пределах ±10%':<50} {metrics['accuracy_within_10']:>14.1f}%")
+        print(f"{'Точность в пределах ±20%':<50} {metrics['accuracy_within_20']:>14.1f}%")
+        print(f"{'Точность в пределах ±30%':<50} {metrics['accuracy_within_30']:>14.1f}%")
+        print(f"\n{'Точность (±1 заказ)':<50} {metrics['accuracy_within_1_order']:>14.1f}%")
+        print(f"{'Точность (±2 заказа)':<50} {metrics['accuracy_within_2_orders']:>14.1f}%")
+        
+        print("\n" + " " * 23 + "ГОСТИ (через конверсию)")
+        print("-" * 70)
+        print(f"{'Метрика':<50} {'Значение':>15}")
+        print("-" * 70)
+        print(f"{'MAE (средняя ошибка)':<50} {metrics['guests_mae']:>15.2f}")
+        print(f"{'RMSE (квадратичная ошибка)':<50} {metrics['guests_rmse']:>15.2f}")
+        print(f"{'R² (коэф. детерминации)':<50} {metrics['guests_r2']:>15.3f}")
+        print(f"{'MAPE (средняя % ошибка)':<50} {metrics['guests_mape']:>14.1f}%")
+        print("\nТОЧНОСТЬ В ПРОЦЕНТАХ:")
+        print(f"{'Общая точность (100% - MAPE)':<50} {metrics['guests_accuracy']:>14.1f}%")
+        print(f"{'Точность (±1 гость)':<50} {metrics['guests_accuracy_within_1']:>14.1f}%")
+        print(f"{'Точность (±2 гостя)':<50} {metrics['guests_accuracy_within_2']:>14.1f}%")
+        
+        print("\n" + " " * 30 + "КОНВЕРСИЯ")
+        print(f"{'Среднее гостей на заказ:':<50} {avg_guests:>15.2f}")
+        
+        # Оценка качества
+        if metrics['test_r2'] >= 0.85:
+            orders_rating = "ОТЛИЧНО"
+        elif metrics['test_r2'] >= 0.70:
+            orders_rating = "ХОРОШО"
+        elif metrics['test_r2'] >= 0.50:
+            orders_rating = "УДОВЛЕТВОРИТЕЛЬНО"
+        else:
+            orders_rating = "ТРЕБУЕТ УЛУЧШЕНИЯ"
+        
+        if metrics['guests_r2'] >= 0.80:
+            guests_rating = "ОТЛИЧНО"
+        elif metrics['guests_r2'] >= 0.65:
+            guests_rating = "ХОРОШО"
+        elif metrics['guests_r2'] >= 0.45:
+            guests_rating = "УДОВЛЕТВОРИТЕЛЬНО"
+        else:
+            guests_rating = "ТРЕБУЕТ УЛУЧШЕНИЯ"
+        
+        print(f"\n{'Заказы:':<30} {orders_rating}")
+        print(f"{'Гости:':<30} {guests_rating}")
     
     return metrics
-
-
-def _prepare_features(df: pd.DataFrame) -> pd.DataFrame:
-    import holidays
-    ru_holidays = holidays.Russia()
-    
-    df = df.copy()
-    
-    df['hour'] = df['datetime'].dt.hour
-    df['hour_encoded'] = np.sin(2 * np.pi * df['hour'] / 24)
-    
-    df['is_lunch_peak'] = ((df['hour'] >= 12) & (df['hour'] <= 14)).astype(int)
-    df['is_dinner_peak'] = ((df['hour'] >= 18) & (df['hour'] <= 21)).astype(int)
-    df['is_peak_hour'] = (df['is_lunch_peak'] | df['is_dinner_peak']).astype(int)
-    
-    df['day_of_week'] = df['datetime'].dt.weekday
-    df['month'] = df['datetime'].dt.month
-    df['day_of_month'] = df['datetime'].dt.day
-    df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
-    df['is_month_start'] = df['datetime'].dt.is_month_start.astype(int)
-    df['is_month_end'] = df['datetime'].dt.is_month_end.astype(int)
-    
-    df['is_holiday'] = df['datetime'].dt.date.apply(
-        lambda x: 1 if x in ru_holidays else 0
-    )
-    
-    df['hour_weekend'] = df['hour_encoded'] * df['is_weekend']
-    df['hour_holiday'] = df['hour_encoded'] * df['is_holiday']
-    df['peak_weekend'] = df['is_peak_hour'] * df['is_weekend']
-    df['peak_holiday'] = df['is_peak_hour'] * df['is_holiday']
-    
-    df['friday_dinner'] = ((df['day_of_week'] == 4) & df['is_dinner_peak']).astype(int)
-    df['saturday_dinner'] = ((df['day_of_week'] == 5) & df['is_dinner_peak']).astype(int)
-    df['sunday_dinner'] = ((df['day_of_week'] == 6) & df['is_dinner_peak']).astype(int)
-    
-    for lag in [1, 24, 168]:
-        df[f'lag_orders_{lag}h'] = df['orders_count'].shift(lag)
-    
-    df['rolling_mean_3h'] = df['orders_count'].rolling(3, min_periods=1).mean()
-    df['rolling_mean_24h'] = df['orders_count'].rolling(24, min_periods=1).mean()
-    df['rolling_std_24h'] = df['orders_count'].rolling(24, min_periods=1).std()
-    
-    for col in ['temperature_mean', 'precipitation', 'is_rainy', 'is_extreme_weather']:
-        if col not in df.columns:
-            df[col] = 0
-    
-    df['rainy_peak'] = df['is_rainy'] * df['is_peak_hour']
-    df['extreme_peak'] = df['is_extreme_weather'] * df['is_peak_hour']
-    
-    df = df.fillna(0)
-    
-    return df
-
-
-def _calculate_metrics(y_true: pd.Series, y_pred: pd.Series, prefix: str) -> Dict:
-    y_pred_rounded = np.maximum(0, np.round(y_pred)).astype(int)
-    y_true_rounded = np.maximum(0, np.round(y_true)).astype(int)
-    
-    # Базовые метрики
-    mae = float(mean_absolute_error(y_true_rounded, y_pred_rounded))
-    rmse = float(np.sqrt(mean_squared_error(y_true_rounded, y_pred_rounded)))
-    r2 = float(r2_score(y_true_rounded, y_pred_rounded))
-    
-    # MAPE (для расчёта общей точности)
-    mask = y_true_rounded > 0
-    if mask.sum() > 0:
-        mape = float(np.mean(np.abs((y_true_rounded[mask] - y_pred_rounded[mask]) / y_true_rounded[mask])) * 100)
-    else:
-        mape = 0.0
-    
-    # Новая метрика: общая точность в %
-    accuracy_percent = max(0, 100 - mape)
-    
-    # Новые метрики: точность в пределах X%
-    accuracy_within_10pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.10)
-    accuracy_within_20pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.20)
-    accuracy_within_30pct = _calculate_percentage_accuracy(y_true_rounded, y_pred_rounded, 0.30)
-    
-    return {
-        f'{prefix}_mae': mae,
-        f'{prefix}_rmse': rmse,
-        f'{prefix}_r2': r2,
-        f'{prefix}_mape': mape,
-        f'{prefix}_accuracy_percent': accuracy_percent,  # 🔥 Новая
-        f'{prefix}_accuracy_within_10pct': accuracy_within_10pct,  # 🔥 Новая
-        f'{prefix}_accuracy_within_20pct': accuracy_within_20pct,  # 🔥 Новая
-        f'{prefix}_accuracy_within_30pct': accuracy_within_30pct,  # 🔥 Новая
-        f'{prefix}_accuracy_within_1': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 1) * 100),
-        f'{prefix}_accuracy_within_2': float(np.mean(np.abs(y_true_rounded - y_pred_rounded) <= 2) * 100),
-    }
-
-
-def _print_report(metrics: Dict):
-    print(f"{'МЕТРИКИ МОДЕЛИ':^70}")
-    
-    # ЗАКАЗЫ
-    print(f"\n{'ЗАКАЗЫ':^70}")
-    print("-" * 70)
-    print(f"{'Метрика':<40} {'Значение':>15}")
-    print("-" * 70)
-    print(f"{'MAE (средняя ошибка):':<40} {metrics.get('orders_mae', 0):>15.2f}")
-    print(f"{'RMSE (квадратичная ошибка):':<40} {metrics.get('orders_rmse', 0):>15.2f}")
-    print(f"{'R² (коэф. детерминации):':<40} {metrics.get('orders_r2', 0):>15.3f}")
-    print(f"{'MAPE (средняя % ошибка):':<40} {metrics.get('orders_mape', 0):>15.1f}%")
-    
-    # Новые метрики точности в %
-    print(f"\n{'ТОЧНОСТЬ В ПРОЦЕНТАХ:':<40}")
-    print(f"{'Общая точность (100% - MAPE):':<40} {metrics.get('orders_accuracy_percent', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±10%:':<40} {metrics.get('orders_accuracy_within_10pct', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±20%:':<40} {metrics.get('orders_accuracy_within_20pct', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±30%:':<40} {metrics.get('orders_accuracy_within_30pct', 0):>15.1f}%")
-    
-    print(f"\n{'Точность (±1 заказ):':<40} {metrics.get('orders_accuracy_within_1', 0):>15.1f}%")
-    print(f"{'Точность (±2 заказа):':<40} {metrics.get('orders_accuracy_within_2', 0):>15.1f}%")
-    
-    # ГОСТИ (аналогично)
-    print(f"\n{'ГОСТИ (через конверсию)':^70}")
-    print("-" * 70)
-    print(f"{'Метрика':<40} {'Значение':>15}")
-    print("-" * 70)
-    print(f"{'MAE (средняя ошибка):':<40} {metrics.get('guests_mae', 0):>15.2f}")
-    print(f"{'RMSE (квадратичная ошибка):':<40} {metrics.get('guests_rmse', 0):>15.2f}")
-    print(f"{'R² (коэф. детерминации):':<40} {metrics.get('guests_r2', 0):>15.3f}")
-    print(f"{'MAPE (средняя % ошибка):':<40} {metrics.get('guests_mape', 0):>15.1f}%")
-    
-    print(f"\n{'ТОЧНОСТЬ В ПРОЦЕНТАХ:':<40}")
-    print(f"{'Общая точность (100% - MAPE):':<40} {metrics.get('guests_accuracy_percent', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±10%:':<40} {metrics.get('guests_accuracy_within_10pct', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±20%:':<40} {metrics.get('guests_accuracy_within_20pct', 0):>15.1f}%")
-    print(f"{'Точность в пределах ±30%:':<40} {metrics.get('guests_accuracy_within_30pct', 0):>15.1f}%")
-    
-    print(f"\n{'Точность (±1 гость):':<40} {metrics.get('guests_accuracy_within_1', 0):>15.1f}%")
-    print(f"{'Точность (±2 гостя):':<40} {metrics.get('guests_accuracy_within_2', 0):>15.1f}%")
-    
-    # КОНВЕРСИЯ
-    print(f"\n{'КОНВЕРСИЯ':^70}")
-    print(f"{'Среднее гостей на заказ:':<40} {metrics.get('avg_guests_per_order', 0):>15.2f}")
-    
-    # Оценка качества
-    orders_r2 = metrics.get('orders_r2', 0)
-    guests_r2 = metrics.get('guests_r2', 0)
-    
-    if orders_r2 >= 0.7:
-        orders_grade = "ОТЛИЧНО"
-    elif orders_r2 >= 0.5:
-        orders_grade = "ХОРОШО"
-    else:
-        orders_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
-    
-    if guests_r2 >= 0.7:
-        guests_grade = "ОТЛИЧНО"
-    elif guests_r2 >= 0.5:
-        guests_grade = "ХОРОШО"
-    else:
-        guests_grade = "ТРЕБУЕТ УЛУЧШЕНИЯ"
-    
-    print(f"\nЗаказы: {orders_grade:^50}")
-    print(f"Гости:  {guests_grade:^50}\n")
-    
-def _calculate_percentage_accuracy(y_true: pd.Series, y_pred: pd.Series, threshold: float) -> float:
-    # Избегаем деления на 0
-    mask = y_true > 0
-    
-    if mask.sum() == 0:
-        return 100.0
-    
-    # Относительная ошибка: |pred - true| / true
-    relative_error = np.abs(y_pred[mask] - y_true[mask]) / y_true[mask]
-    
-    # % прогнозов в пределах порога
-    accuracy = (relative_error <= threshold).mean() * 100
-    
-    return float(accuracy)
