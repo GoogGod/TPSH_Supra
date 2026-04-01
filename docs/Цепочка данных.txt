@@ -1,0 +1,28 @@
+1. Загрузка сырых данных
+   POST /forecast/upload-data/  →  ml_data/data/raw/real_orders.csv
+
+2. ML-пайплайн
+   POST /forecast/run/
+   → process_data: raw CSV/Excel → processed_orders.csv
+   → train_model: обучение XGBoost → model_orders.pkl
+   → make_forecast: прогноз → forecast.csv → БД (HourlyForecast)
+   → evaluate: метрики → ForecastRun
+
+3. Просмотр прогноза
+   GET /forecast/daily/?venue=1  →  агрегированный прогноз по дням
+
+4. Генерация расписания
+   POST /forecast/generate-schedule/
+   → scheduler.py: forecast.csv → waiter_schedule.csv (OR-Tools)
+   → csv_parser: waiter_schedule.csv → MonthlySchedule (draft)
+
+5. Публикация
+   POST /schedule/monthly/{id}/publish/
+   → уведомление всем сотрудникам venue
+
+6. Заполнение позиций
+   POST /schedule/slots/{id}/claim/      ← сотрудник сам
+   POST /schedule/slots/{id}/assign/     ← менеджер назначает (+ подтверждение)
+
+7. Напоминания
+   manage.py send_schedule_reminders     ← cron, последняя неделя месяца

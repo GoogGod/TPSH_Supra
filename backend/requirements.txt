@@ -1,0 +1,30 @@
+# Ядро системы
+django==5.0.3
+djangorestframework==3.15.1
+django-cors-headers==4.3.1  # Критично для связи с Vue 3
+
+# Аутентификация (JWT для мобильной версии и SPA)
+djangorestframework-simplejwt==5.3.1
+
+# Работа с базой данных (PostgreSQL для продакшена)
+psycopg2-binary==2.9.9
+dj-database-url==2.1.0
+
+# ML и Аналитика (требования из ml_data/)
+pandas>=3.0.1
+numpy>=2.4.3
+scikit-learn>=1.8.0
+xgboost>=3.2.0
+ortools>=9.15.6755
+joblib>=1.5.3
+holidays>=0.93
+requests>=2.33.0
+openpyxl>=3.1.5
+
+# Документация API
+drf-spectacular==0.27.1
+
+# Деплой
+python-dotenv==1.0.1
+gunicorn==21.2.0
+whitenoise==6.6.0
