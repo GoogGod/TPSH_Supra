@@ -1,0 +1,9 @@
+pandas>=3.0.1
+numpy>=2.4.3
+holidays>=0.93
+requests>=2.33.0
+joblib>=1.5.3
+scikit-learn>=1.8.0
+openpyxl>=3.1.5
+xgboost>=3.2.0
+ortools>=9.15.6755

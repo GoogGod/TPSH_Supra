@@ -34,8 +34,6 @@ def run_demo():
         last_name="Иванов",
         role=User.Role.EMPLOYEE_NOOB,
         venue=venue,
-        schedule_pattern=User.SchedulePattern.FOUR_TWO,
-        shift_duration=User.ShiftDuration.FOURTEEN,
     )
 
     waiter_2 = User.objects.create_user(
@@ -46,12 +44,10 @@ def run_demo():
         last_name="Петров",
         role=User.Role.EMPLOYEE_PRO,
         venue=venue,
-        schedule_pattern=User.SchedulePattern.TWO_TWO,
-        shift_duration=User.ShiftDuration.EIGHT,
     )
 
-    print(waiter_1.schedule_pattern, waiter_1.work_days, waiter_1.off_days)
-    print(waiter_2.schedule_pattern, waiter_2.work_days, waiter_2.off_days)
+    print(waiter_1.role)
+    print(waiter_2.role)
     print(venue.staff.count())
     print(settings.SCHEDULE_RULES)
 

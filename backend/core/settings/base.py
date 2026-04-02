@@ -47,11 +47,15 @@ MIDDLEWARE = [
 REPO_ROOT = BASE_DIR.parent
 
 # Путь к ml_data
-ML_DATA_DIR = REPO_ROOT / "ml_data"
-ML_DATA_RAW = ML_DATA_DIR / "data" / "raw"
-ML_DATA_PROCESSED = ML_DATA_DIR / "data" / "processed"
-ML_DATA_PREDICTED = ML_DATA_DIR / "data" / "predicted"
-ML_MODELS_DIR = ML_DATA_DIR / "models"
+ML_DATA_DIR = Path(os.getenv("ML_DATA_DIR", str(REPO_ROOT / "ml_data"))).resolve()
+ML_DATA_RAW = Path(os.getenv("ML_DATA_RAW", str(ML_DATA_DIR / "data" / "raw"))).resolve()
+ML_DATA_PROCESSED = Path(
+    os.getenv("ML_DATA_PROCESSED", str(ML_DATA_DIR / "data" / "processed"))
+).resolve()
+ML_DATA_PREDICTED = Path(
+    os.getenv("ML_DATA_PREDICTED", str(ML_DATA_DIR / "data" / "predicted"))
+).resolve()
+ML_MODELS_DIR = Path(os.getenv("ML_MODELS_DIR", str(ML_DATA_DIR / "models"))).resolve()
 
 # Добавить ml_data в PYTHONPATH чтобы import ml_data.* работал
 import sys
@@ -118,8 +122,12 @@ REST_FRAMEWORK = {
 
 # JWT
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(os.getenv("JWT_ACCESS_TOKEN_MINUTES", "480"))  # 8 hours
+    ),
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=int(os.getenv("JWT_REFRESH_TOKEN_DAYS", "30"))
+    ),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),

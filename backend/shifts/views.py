@@ -1,9 +1,10 @@
-from rest_framework import status
+﻿from rest_framework import status
 from rest_framework.generics import ListAPIView
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
+from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 
@@ -18,6 +19,8 @@ from .services.csv_parser import parse_schedule_csv, CSVParseError
 from users.permissions import IsManager, IsEmployee
 from datetime import date
 import calendar
+import csv
+from pathlib import Path
 
 from user_notifications.services import (
     notify_schedule_published,
@@ -117,6 +120,21 @@ class MonthlyScheduleListView(ListAPIView):
             qs = qs.filter(venue=user.venue)
         # admin видит всё
 
+        venue_param = self.request.query_params.get("venue")
+        if venue_param:
+            try:
+                venue_id = int(venue_param)
+            except (TypeError, ValueError):
+                return MonthlySchedule.objects.none()
+
+            # Для manager/employee разрешаем только свой venue.
+            if user.is_admin_role:
+                qs = qs.filter(venue_id=venue_id)
+            else:
+                if not user.venue_id or user.venue_id != venue_id:
+                    return MonthlySchedule.objects.none()
+                qs = qs.filter(venue_id=venue_id)
+
         qs = qs.annotate(
             total_slots=Count("slots"),
             filled_slots=Count("slots", filter=Q(
@@ -136,8 +154,9 @@ class MonthlyScheduleListView(ListAPIView):
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
 
-        # Для employee: если список пуст, вернуть подсказку
-        if request.user.is_employee and not response.data.get("results", response.data):
+        payload = response.data
+        items = payload.get("results", payload) if isinstance(payload, dict) else payload
+        if request.user.is_employee and not items:
             return Response({
                 "results": [],
                 "message": "Опубликованных расписаний пока нет. Пожалуйста, подождите.",
@@ -564,20 +583,171 @@ class GenerateMonthlyScheduleView(APIView):
     Бэкенд:
     1. Проверяет что модель обучена (admin уже сделал это)
     2. Запускает прогноз на нужный месяц (forecast)
-    3. Запускает scheduler (OR-Tools) → waiter_schedule.csv
-    4. Парсит CSV → MonthlySchedule (draft)
+    3. Запускает scheduler (OR-Tools) -> waiter_schedule.csv
+    4. Парсит CSV -> MonthlySchedule (draft)
     5. Возвращает созданное расписание
 
     Менеджер НЕ тренирует модель. Он использует то, что подготовил admin.
     """
     permission_classes = [IsAuthenticated, IsManager]
 
+    @staticmethod
+    def _build_waiter_config(venue):
+        """
+        Собрать waiter_config под scheduler из активных сотрудников venue.
+        employee_pro -> pro, employee_noob -> noob.
+        """
+        from users.models import User
+
+        staff = list(
+            User.objects.filter(
+                venue=venue,
+                is_active=True,
+                role__in=[User.Role.EMPLOYEE_PRO, User.Role.EMPLOYEE_NOOB],
+            ).order_by("id")
+        )
+
+        waiter_config = {}
+        idx = 1
+        for employee in staff:
+            waiter_config[idx] = (
+                "pro"
+                if employee.role == User.Role.EMPLOYEE_PRO
+                else "noob"
+            )
+            idx += 1
+
+        # Минимальная базовая ёмкость для ограничений scheduler: >= 10 условных единиц.
+        # pro = 2, noob = 1.
+        capacity_units = sum(2 if t == "pro" else 1 for t in waiter_config.values())
+        while capacity_units < 10:
+            waiter_config[idx] = "pro"
+            idx += 1
+            capacity_units += 2
+
+        # Если сотрудников вообще нет, отдаём рабочий базовый конфиг.
+        if not waiter_config:
+            waiter_config = {
+                1: "pro",
+                2: "pro",
+                3: "pro",
+                4: "pro",
+                5: "pro",
+            }
+
+        return waiter_config
+
+    @staticmethod
+    def _extend_waiter_config(waiter_config: dict, target_total: int) -> dict:
+        """Расширить waiter_config до target_total, добавляя pro."""
+        normalized = {}
+        idx = 1
+        for _, waiter_type in sorted(waiter_config.items(), key=lambda kv: int(kv[0])):
+            normalized[idx] = waiter_type
+            idx += 1
+
+        while len(normalized) < target_total:
+            normalized[idx] = "pro"
+            idx += 1
+
+        return normalized
+
+    @staticmethod
+    def _has_working_shifts(schedule_df) -> bool:
+        if schedule_df is None or schedule_df.empty:
+            return False
+
+        if "shift_type_code" in schedule_df.columns:
+            return bool((schedule_df["shift_type_code"] > 0).any())
+
+        if "work_hours" in schedule_df.columns:
+            try:
+                return bool(schedule_df["work_hours"].fillna(0).astype(float).gt(0).any())
+            except (TypeError, ValueError):
+                return True
+
+        return True
+
+    @staticmethod
+    def _csv_has_working_shifts(schedule_csv_path: Path) -> bool:
+        if not schedule_csv_path.exists() or schedule_csv_path.stat().st_size == 0:
+            return False
+
+        try:
+            with open(schedule_csv_path, "r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    shift_code_raw = str(row.get("shift_type_code", "")).strip()
+                    if shift_code_raw:
+                        try:
+                            if int(float(shift_code_raw)) > 0:
+                                return True
+                        except ValueError:
+                            pass
+
+                    work_hours_raw = str(row.get("work_hours", "")).strip()
+                    if work_hours_raw:
+                        try:
+                            if float(work_hours_raw) > 0:
+                                return True
+                        except ValueError:
+                            pass
+        except OSError:
+            return False
+
+        return False
+
+    @staticmethod
+    def _generate_schedule_fallback(*, forecast_csv_path: Path, schedule_csv_path: Path, waiter_config: dict):
+        """
+        Если main.py не создал waiter_schedule.csv, пробуем построить напрямую через scheduler.
+        При пустом результате автоматически увеличиваем число виртуальных pro.
+        """
+        if GenerateMonthlyScheduleView._csv_has_working_shifts(schedule_csv_path):
+            return
+
+        if not forecast_csv_path.exists() or forecast_csv_path.stat().st_size == 0:
+            raise FileNotFoundError(f"Файл прогноза не найден: {forecast_csv_path}")
+
+        import sys
+
+        ml_data_path = str(settings.ML_DATA_DIR)
+        if ml_data_path not in sys.path:
+            sys.path.insert(0, ml_data_path)
+
+        from ml_data.scheduler import create_waiter_schedule
+
+        schedule_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        base_waiters = max(len(waiter_config), 1)
+        max_waiters = max(base_waiters, 24)
+        last_attempt = base_waiters
+
+        for total_waiters in range(base_waiters, max_waiters + 1):
+            current_config = GenerateMonthlyScheduleView._extend_waiter_config(
+                waiter_config, total_waiters
+            )
+            schedule_df, _ = create_waiter_schedule(
+                forecast_path=str(forecast_csv_path),
+                waiter_config=current_config,
+                output_path=str(schedule_csv_path),
+                verbose=False,
+            )
+            last_attempt = total_waiters
+
+            if GenerateMonthlyScheduleView._has_working_shifts(schedule_df):
+                if not schedule_csv_path.exists() or schedule_csv_path.stat().st_size == 0:
+                    raise FileNotFoundError(f"Файл расписания не создан: {schedule_csv_path}")
+                return
+
+        raise CSVParseError(
+            f"planner вернул пустое расписание (даже при {last_attempt} официантах)"
+        )
+
     def post(self, request):
         venue_id = request.data.get("venue")
         year = request.data.get("year")
         month = request.data.get("month")
 
-        # ── Валидация ──
         if not venue_id:
             if request.user.venue:
                 venue_id = request.user.venue_id
@@ -586,13 +756,27 @@ class GenerateMonthlyScheduleView(APIView):
                     {"detail": "Укажите venue."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        try:
+            venue_id = int(venue_id)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Некорректный venue."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             venue = Venue.objects.get(id=venue_id, is_active=True)
         except Venue.DoesNotExist:
             return Response({"detail": "Объект не найден."}, status=404)
 
-        # Определить год/месяц
+        # Manager работает только со своим venue.
+        if request.user.is_manager and not request.user.is_admin_role:
+            if not request.user.venue_id or venue_id != request.user.venue_id:
+                return Response(
+                    {"detail": "Доступ к этому объекту запрещен."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         if not year or not month:
             today = date.today()
             if today.month == 12:
@@ -602,7 +786,6 @@ class GenerateMonthlyScheduleView(APIView):
         else:
             year, month = int(year), int(month)
 
-        # ── Проверить что расписание ещё не создано ──
         existing = MonthlySchedule.objects.filter(
             venue=venue, year=year, month=month
         ).first()
@@ -613,86 +796,122 @@ class GenerateMonthlyScheduleView(APIView):
                     {"detail": f"Расписание на {month:02d}/{year} уже опубликовано."},
                     status=status.HTTP_409_CONFLICT,
                 )
-            else:
-                # Черновик — удалить и перегенерировать
-                existing.delete()
+            existing.delete()
 
-        # ── Проверить что модель обучена ──
         from forecasting.models import ForecastRun
-        has_model = ForecastRun.objects.filter(
+
+        model_file = Path(settings.ML_MODELS_DIR) / "model_orders.pkl"
+        has_model_run = ForecastRun.objects.filter(
             status="completed",
             train_model=True,
         ).exists()
+        has_model_file = model_file.exists() and model_file.stat().st_size > 0
+        has_model = has_model_run and has_model_file
 
         if not has_model:
             return Response(
-                {"detail": "Модель не обучена. Обратитесь к администратору."},
+                {
+                    "detail": (
+                        "Модель не обучена или файл модели отсутствует. "
+                        "Обратитесь к администратору."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Шаг 1: Прогноз на нужный месяц ──
         from forecasting.services.ml_runner import MLRunner
         from forecasting.services.forecast_loader import load_forecast_to_db, ForecastLoadError
 
-        # Определить даты прогноза
         _, last_day = calendar.monthrange(year, month)
         forecast_from = date(year, month, 1)
         forecast_to = date(year, month, last_day)
+        waiter_config = self._build_waiter_config(venue)
 
         forecast_run = ForecastRun.objects.create(
             venue=venue,
             triggered_by=request.user,
-            process_data=False,   # Данные уже обработаны админом
-            train_model=False,    # Модель уже обучена админом
+            process_data=False,
+            train_model=False,
             make_forecast=True,
             evaluate=False,
             forecast_from=forecast_from,
             forecast_to=forecast_to,
         )
 
+        run_outputs_dir = (
+            Path(settings.ML_DATA_PREDICTED)
+            / "runs"
+            / f"venue_{venue.id}"
+            / f"run_{forecast_run.id}"
+        )
+        forecast_csv_path = run_outputs_dir / "forecast.csv"
+        schedule_csv_path = run_outputs_dir / "waiter_schedule.csv"
+
         try:
             runner = MLRunner(forecast_run)
-            runner.execute()
-        except Exception as e:
+            runner.execute(
+                predicted_dir=run_outputs_dir,
+                make_schedule=True,
+                pipeline_kwargs={
+                    "num_waiters": len(waiter_config),
+                    "waiter_config": waiter_config,
+                },
+            )
+        except Exception:
             return Response(
                 {"detail": f"Ошибка прогноза: {forecast_run.error_message}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # Загрузить прогнозы в БД
         try:
-            load_forecast_to_db(forecast_run)
+            load_forecast_to_db(forecast_run, csv_path=forecast_csv_path)
         except ForecastLoadError as e:
             return Response(
                 {"detail": f"Прогноз создан, но ошибка загрузки: {e}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # ── Шаг 2: Генерация расписания ──
-        from forecasting.services.schedule_generator import (
-            generate_schedule_full,
-            ScheduleGenerationError,
-        )
-
         try:
-            result = generate_schedule_full(venue)
-        except ScheduleGenerationError as e:
+            self._generate_schedule_fallback(
+                forecast_csv_path=forecast_csv_path,
+                schedule_csv_path=schedule_csv_path,
+                waiter_config=waiter_config,
+            )
+            with open(schedule_csv_path, "r", encoding="utf-8-sig") as f:
+                csv_content = f.read()
+            schedule = parse_schedule_csv(csv_content, venue)
+        except (CSVParseError, FileNotFoundError) as e:
             return Response(
                 {"detail": f"Ошибка генерации расписания: {e}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        # ── Вернуть созданное расписание ──
-        schedule = MonthlySchedule.objects.prefetch_related(
-            "slots__entries",
-            "slots__assigned_employee",
-        ).get(id=result["schedule_id"])
+        if schedule.year != year or schedule.month != month:
+            schedule.delete()
+            return Response(
+                {
+                    "detail": (
+                        f"Сгенерировано некорректное окно: {schedule.month:02d}/{schedule.year}, "
+                        f"ожидалось {month:02d}/{year}."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
-        from .serializers import MonthlyScheduleDetailSerializer
-        serializer = MonthlyScheduleDetailSerializer(schedule)
+        slots_count = schedule.slots.count()
+        entries_count = schedule.slots.aggregate(total_entries=Count("entries"))["total_entries"] or 0
 
-        return Response({
-            "detail": "Расписание сгенерировано (черновик).",
-            "forecast_run_id": forecast_run.id,
-            "schedule": serializer.data,
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "detail": "Расписание сгенерировано (черновик).",
+                "schedule_id": schedule.id,
+                "year": schedule.year,
+                "month": schedule.month,
+                "slots_count": slots_count,
+                "entries_count": entries_count,
+                "forecast_run_id": forecast_run.id,
+                "artifacts_dir": str(run_outputs_dir),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+

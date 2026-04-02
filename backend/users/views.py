@@ -7,6 +7,8 @@ from drf_spectacular.utils import extend_schema
 
 from .serializers import RegisterSerializer, UserSerializer
 from .permissions import IsManager
+from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
+from django.db import models
 
 
 class RegisterView(APIView):
@@ -14,7 +16,7 @@ class RegisterView(APIView):
     Регистрация нового сотрудника.
     Доступно только менеджерам и администраторам.
     """
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         request=RegisterSerializer,
@@ -89,3 +91,52 @@ class MeView(APIView):
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
+    
+class UserListView(ListAPIView):
+    """Список сотрудников объекта. Manager видит свой venue, Admin — всех."""
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        from .models import User
+        user = self.request.user
+        qs = User.objects.select_related("venue").filter(is_active=True)
+
+        if not user.is_admin_role:
+            if not user.venue_id:
+                qs = qs.filter(role="admin")
+            else:
+                qs = qs.filter(models.Q(venue=user.venue) | models.Q(role="admin"))
+
+        role = self.request.query_params.get("role")
+        venue = self.request.query_params.get("venue")
+        search = self.request.query_params.get("search")
+
+        if role:
+            qs = qs.filter(role=role)
+        if venue:
+            qs = qs.filter(venue_id=venue)
+        if search:
+            qs = qs.filter(
+                models.Q(first_name__icontains=search) |
+                models.Q(last_name__icontains=search) |
+                models.Q(username__icontains=search)
+            )
+
+        return qs
+
+
+class UserDetailView(RetrieveUpdateAPIView):
+    """Детали / редактирование сотрудника. Admin может менять роль."""
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def get_queryset(self):
+        from .models import User
+        user = self.request.user
+        qs = User.objects.select_related("venue")
+
+        if user.is_manager and not user.is_admin_role:
+            qs = qs.filter(venue=user.venue)
+
+        return qs

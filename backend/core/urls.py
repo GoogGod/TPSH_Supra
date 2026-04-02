@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from users.views import MeView
+from users.urls import user_urlpatterns
 
 urlpatterns = [
     # Django Admin
@@ -21,6 +22,7 @@ urlpatterns = [
 
     # Users
     path("api/v1/users/me/", MeView.as_view(), name="user-me"),
+    path("api/v1/users/", include(user_urlpatterns)),
 
     # Shifts + Schedule + Venues
     path("api/v1/", include("shifts.urls")),

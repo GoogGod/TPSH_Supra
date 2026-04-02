@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: supra-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    plan: free
+    disk:
+      name: supra-ml-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DJANGO_ENV
+        value: production
+      - key: ML_DATA_DIR
+        value: /var/data/ml_data
+      - key: ALLOWED_HOSTS
+        value: your-service-name.onrender.com
+      - key: CORS_ORIGINS
+        value: https://your-frontend.onrender.com
+      - key: JWT_ACCESS_TOKEN_MINUTES
+        value: 480
+      - key: JWT_REFRESH_TOKEN_DAYS
+        value: 30
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: supra-postgres
+          property: connectionString
+
+databases:
+  - name: supra-postgres
+    plan: free

@@ -1,4 +1,4 @@
-from rest_framework import status
+﻿from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
@@ -8,6 +8,7 @@ from drf_spectacular.utils import extend_schema
 from django.conf import settings
 from django.db.models import Sum, Max, Min, Avg, Q, F
 from django.db.models.functions import TruncDate
+from pathlib import Path
 
 from .models import ForecastRun, HourlyForecast
 from .serializers import (
@@ -27,89 +28,64 @@ from shifts.models import Venue
 from shifts.serializers import MonthlyScheduleDetailSerializer
 from users.permissions import IsManager, IsAdmin
 
-import calendar
-from datetime import date
-
-from django.db.models import Count, Q
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from drf_spectacular.utils import extend_schema
-
-from .models import Venue, MonthlySchedule, WaiterSlot
-from .serializers import (
-    VenueSerializer,
-    MonthlyScheduleListSerializer,
-    MonthlyScheduleDetailSerializer,
-    WaiterSlotDetailSerializer,
-)
-from shifts.services.csv_parser import parse_schedule_csv, CSVParseError
-from users.permissions import IsManager, IsEmployee, IsOnlyEmployee
-
-from user_notifications.services import (
-    notify_schedule_published,
-    notify_slot_claimed,
-    notify_manual_assignment,
-    notify_assignment_response,
-)
-
 
 class RunForecastView(APIView):
     """
-    Запустить ML-пайплайн.
+    Р—Р°РїСѓСЃС‚РёС‚СЊ ML-РїР°Р№РїР»Р°Р№РЅ.
 
-    ADMIN: может всё (process_data, train_model, make_forecast, evaluate).
-    MANAGER: может только make_forecast (использует существующую модель).
+    ADMIN: РјРѕР¶РµС‚ РІСЃС‘ (process_data, train_model, make_forecast, evaluate).
+    MANAGER: РјРѕР¶РµС‚ С‚РѕР»СЊРєРѕ make_forecast (РёСЃРїРѕР»СЊР·СѓРµС‚ СЃСѓС‰РµСЃС‚РІСѓСЋС‰СѓСЋ РјРѕРґРµР»СЊ).
     """
     permission_classes = [IsAuthenticated, IsManager]
-
-    def post(self, request):
-        serializer = ForecastRunCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
-        user = request.user
-
-        # ── Менеджер не может тренировать модель ──
-        if user.role == "manager":
-            if data.get("process_data", False):
-                return Response(
-                    {"detail": "Обработка данных доступна только администратору."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            if data.get("train_model", False):
-                return Response(
-                    {"detail": "Обучение модели доступно только администратору."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            if data.get("evaluate", False):
-                return Response(
-                    {"detail": "Оценка модели доступна только администратору."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            # Принудительно выключить
-            data["process_data"] = False
-            data["train_model"] = False
-            data["evaluate"] = False
 
     @extend_schema(
         request=ForecastRunCreateSerializer,
         responses={201: ForecastRunSerializer},
-        summary="Запустить ML-пайплайн",
+        summary="Р—Р°РїСѓСЃС‚РёС‚СЊ ML-РїР°Р№РїР»Р°Р№РЅ",
         tags=["forecast"],
     )
     def post(self, request):
         serializer = ForecastRunCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        user = request.user
+
+        # Manager может использовать только существующую модель/данные.
+        if user.role == "manager":
+            if data.get("process_data", False):
+                return Response(
+                    {"detail": "РћР±СЂР°Р±РѕС‚РєР° РґР°РЅРЅС‹С… РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if data.get("train_model", False):
+                return Response(
+                    {"detail": "РћР±СѓС‡РµРЅРёРµ РјРѕРґРµР»Рё РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if data.get("evaluate", False):
+                return Response(
+                    {"detail": "РћС†РµРЅРєР° РјРѕРґРµР»Рё РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Если прогноз без обучения — файл модели должен уже существовать.
+        if data.get("make_forecast", True) and not data.get("train_model", False):
+            model_file = settings.ML_MODELS_DIR / "model_orders.pkl"
+            if (not model_file.exists()) or model_file.stat().st_size == 0:
+                return Response(
+                    {
+                        "detail": (
+                            "РњРѕРґРµР»СЊ РЅРµ РЅР°Р№РґРµРЅР°. "
+                            "РЎРЅР°С‡Р°Р»Р° Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РґРѕР»Р¶РµРЅ РѕР±СѓС‡РёС‚СЊ РјРѕРґРµР»СЊ."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         try:
             venue = Venue.objects.get(id=data["venue"], is_active=True)
         except Venue.DoesNotExist:
-            return Response({"detail": "Объект не найден."}, status=404)
+            return Response({"detail": "РћР±СЉРµРєС‚ РЅРµ РЅР°Р№РґРµРЅ."}, status=404)
 
         run = ForecastRun.objects.create(
             venue=venue,
@@ -123,24 +99,33 @@ class RunForecastView(APIView):
             hours_ahead=data.get("hours_ahead", 720),
         )
 
+        run_outputs_dir = (
+            Path(settings.ML_DATA_PREDICTED)
+            / "runs"
+            / f"venue_{venue.id}"
+            / f"run_{run.id}"
+        )
+
         try:
             runner = MLRunner(run)
-            runner.execute()
+            runner.execute(predicted_dir=run_outputs_dir, make_schedule=False)
 
             if run.make_forecast:
                 try:
-                    load_forecast_to_db(run)
+                    load_forecast_to_db(run, csv_path=run_outputs_dir / "forecast.csv")
                 except ForecastLoadError as e:
-                    run.error_message = f"Пайплайн OK, но загрузка прогноза: {e}"
+                    run.error_message = f"РџР°Р№РїР»Р°Р№РЅ OK, РЅРѕ Р·Р°РіСЂСѓР·РєР° РїСЂРѕРіРЅРѕР·Р°: {e}"
                     run.save(update_fields=["error_message"])
         except Exception:
             pass
+
+        run.refresh_from_db()
 
         response_serializer = ForecastRunSerializer(run)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 class ForecastRunListView(ListAPIView):
-    """История запусков ML. ТОЛЬКО ADMIN."""
+    """РСЃС‚РѕСЂРёСЏ Р·Р°РїСѓСЃРєРѕРІ ML. РўРћР›Р¬РљРћ ADMIN."""
     serializer_class = ForecastRunSerializer
     permission_classes = [IsAuthenticated, IsAdmin]
 
@@ -153,7 +138,7 @@ class ForecastRunListView(ListAPIView):
 
 
 class ForecastRunDetailView(APIView):
-    """Детали одного запуска + метрики."""
+    """Р”РµС‚Р°Р»Рё РѕРґРЅРѕРіРѕ Р·Р°РїСѓСЃРєР° + РјРµС‚СЂРёРєРё."""
     permission_classes = [IsAuthenticated, IsAdmin] 
 
     def get(self, request, pk):
@@ -162,7 +147,7 @@ class ForecastRunDetailView(APIView):
                 "venue", "triggered_by"
             ).get(pk=pk)
         except ForecastRun.DoesNotExist:
-            return Response({"detail": "Не найдено."}, status=404)
+            return Response({"detail": "РќРµ РЅР°Р№РґРµРЅРѕ."}, status=404)
 
         serializer = ForecastRunSerializer(run)
         return Response(serializer.data)
@@ -170,7 +155,7 @@ class ForecastRunDetailView(APIView):
 
 class HourlyForecastView(ListAPIView):
     """
-    Почасовой прогноз.
+    РџРѕС‡Р°СЃРѕРІРѕР№ РїСЂРѕРіРЅРѕР·.
     Query params: venue, date_from, date_to, run_id
     """
     serializer_class = HourlyForecastSerializer
@@ -194,7 +179,7 @@ class HourlyForecastView(ListAPIView):
         if run_id:
             qs = qs.filter(run_id=run_id)
         else:
-            # По умолчанию — последний успешный run для venue
+            # РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ вЂ” РїРѕСЃР»РµРґРЅРёР№ СѓСЃРїРµС€РЅС‹Р№ run РґР»СЏ venue
             if venue:
                 last_run = ForecastRun.objects.filter(
                     venue_id=venue,
@@ -208,8 +193,8 @@ class HourlyForecastView(ListAPIView):
 
 class DailyForecastView(APIView):
     """
-    Агрегированный прогноз по дням (сумма за день).
-    Менеджер видит: дата, всего заказов, утром, вечером.
+    РђРіСЂРµРіРёСЂРѕРІР°РЅРЅС‹Р№ РїСЂРѕРіРЅРѕР· РїРѕ РґРЅСЏРј (СЃСѓРјРјР° Р·Р° РґРµРЅСЊ).
+    РњРµРЅРµРґР¶РµСЂ РІРёРґРёС‚: РґР°С‚Р°, РІСЃРµРіРѕ Р·Р°РєР°Р·РѕРІ, СѓС‚СЂРѕРј, РІРµС‡РµСЂРѕРј.
     """
     permission_classes = [IsAuthenticated, IsManager]
 
@@ -220,11 +205,11 @@ class DailyForecastView(APIView):
 
         if not venue:
             return Response(
-                {"detail": "Укажите venue."},
+                {"detail": "РЈРєР°Р¶РёС‚Рµ venue."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Найти последний успешный run
+        # РќР°Р№С‚Рё РїРѕСЃР»РµРґРЅРёР№ СѓСЃРїРµС€РЅС‹Р№ run
         last_run = ForecastRun.objects.filter(
             venue_id=venue,
             status="completed",
@@ -232,7 +217,7 @@ class DailyForecastView(APIView):
 
         if not last_run:
             return Response(
-                {"detail": "Нет завершённых прогнозов для этого объекта."},
+                {"detail": "РќРµС‚ Р·Р°РІРµСЂС€С‘РЅРЅС‹С… РїСЂРѕРіРЅРѕР·РѕРІ РґР»СЏ СЌС‚РѕРіРѕ РѕР±СЉРµРєС‚Р°."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -245,7 +230,7 @@ class DailyForecastView(APIView):
         if date_to:
             qs = qs.filter(date__lte=date_to)
 
-        # Агрегация по дням
+        # РђРіСЂРµРіР°С†РёСЏ РїРѕ РґРЅСЏРј
         daily = qs.values("date").annotate(
             day_of_week=Min("day_of_week"),
             is_weekend=Max("is_weekend"),
@@ -271,7 +256,7 @@ class DailyForecastView(APIView):
 
 
 class ModelAccuracyView(APIView):
-    """Метрики точности последней обученной модели."""
+    """РњРµС‚СЂРёРєРё С‚РѕС‡РЅРѕСЃС‚Рё РїРѕСЃР»РµРґРЅРµР№ РѕР±СѓС‡РµРЅРЅРѕР№ РјРѕРґРµР»Рё."""
     permission_classes = [IsAuthenticated, IsAdmin]
 
     def get(self, request):
@@ -289,7 +274,7 @@ class ModelAccuracyView(APIView):
 
         if not last_run:
             return Response(
-                {"detail": "Нет данных о точности модели."},
+                {"detail": "РќРµС‚ РґР°РЅРЅС‹С… Рѕ С‚РѕС‡РЅРѕСЃС‚Рё РјРѕРґРµР»Рё."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -308,14 +293,14 @@ class ModelAccuracyView(APIView):
 
 class GenerateScheduleView(APIView):
     """
-    DEPRECATED: Используйте POST /schedule/generate/ вместо этого.
-    Оставлено для обратной совместимости. ТОЛЬКО ADMIN.
+    DEPRECATED: РСЃРїРѕР»СЊР·СѓР№С‚Рµ POST /schedule/generate/ РІРјРµСЃС‚Рѕ СЌС‚РѕРіРѕ.
+    РћСЃС‚Р°РІР»РµРЅРѕ РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё. РўРћР›Р¬РљРћ ADMIN.
     """
     permission_classes = [IsAuthenticated, IsAdmin]
 
     @extend_schema(
         request=GenerateScheduleSerializer,
-        summary="Сгенерировать расписание из прогноза",
+        summary="РЎРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ СЂР°СЃРїРёСЃР°РЅРёРµ РёР· РїСЂРѕРіРЅРѕР·Р°",
         tags=["forecast"],
     )
     def post(self, request):
@@ -328,11 +313,11 @@ class GenerateScheduleView(APIView):
             venue = Venue.objects.get(id=venue_id, is_active=True)
         except Venue.DoesNotExist:
             return Response(
-                {"detail": "Объект не найден."},
+                {"detail": "РћР±СЉРµРєС‚ РЅРµ РЅР°Р№РґРµРЅ."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Проверить что есть прогноз
+        # РџСЂРѕРІРµСЂРёС‚СЊ С‡С‚Рѕ РµСЃС‚СЊ РїСЂРѕРіРЅРѕР·
         has_forecast = ForecastRun.objects.filter(
             venue=venue,
             status="completed",
@@ -341,7 +326,7 @@ class GenerateScheduleView(APIView):
 
         if not has_forecast:
             return Response(
-                {"detail": "Сначала запустите прогноз для этого объекта."},
+                {"detail": "РЎРЅР°С‡Р°Р»Р° Р·Р°РїСѓСЃС‚РёС‚Рµ РїСЂРѕРіРЅРѕР· РґР»СЏ СЌС‚РѕРіРѕ РѕР±СЉРµРєС‚Р°."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -354,33 +339,33 @@ class GenerateScheduleView(APIView):
             )
 
         return Response({
-            "detail": "Расписание создано (черновик).",
+            "detail": "Р Р°СЃРїРёСЃР°РЅРёРµ СЃРѕР·РґР°РЅРѕ (С‡РµСЂРЅРѕРІРёРє).",
             **result,
         }, status=status.HTTP_201_CREATED)
 
 
 class UploadRawDataView(APIView):
-    """Загрузить сырые данные (Excel или CSV) для обучения модели."""
+    """Р—Р°РіСЂСѓР·РёС‚СЊ СЃС‹СЂС‹Рµ РґР°РЅРЅС‹Рµ (Excel РёР»Рё CSV) РґР»СЏ РѕР±СѓС‡РµРЅРёСЏ РјРѕРґРµР»Рё."""
     permission_classes = [IsAuthenticated, IsAdmin]
 
     def post(self, request):
         uploaded_file = request.FILES.get("file")
         if not uploaded_file:
             return Response(
-                {"detail": "Файл не передан. Используйте поле 'file'."},
+                {"detail": "Р¤Р°Р№Р» РЅРµ РїРµСЂРµРґР°РЅ. РСЃРїРѕР»СЊР·СѓР№С‚Рµ РїРѕР»Рµ 'file'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         name = uploaded_file.name.lower()
 
-        # Определить куда сохранять
+        # РћРїСЂРµРґРµР»РёС‚СЊ РєСѓРґР° СЃРѕС…СЂР°РЅСЏС‚СЊ
         if name.endswith(".csv"):
             dest_name = "real_orders.csv"
         elif name.endswith((".xlsx", ".xls")):
             dest_name = "real_orders.xlsx"
         else:
             return Response(
-                {"detail": "Допустимые форматы: .csv, .xlsx, .xls"},
+                {"detail": "Р”РѕРїСѓСЃС‚РёРјС‹Рµ С„РѕСЂРјР°С‚С‹: .csv, .xlsx, .xls"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -393,8 +378,9 @@ class UploadRawDataView(APIView):
                 f.write(chunk)
 
         return Response({
-            "detail": "Файл загружен.",
+            "detail": "Р¤Р°Р№Р» Р·Р°РіСЂСѓР¶РµРЅ.",
             "path": str(dest_path),
             "filename": dest_name,
             "size_mb": round(uploaded_file.size / 1024 / 1024, 2),
         }, status=status.HTTP_201_CREATED)
+
