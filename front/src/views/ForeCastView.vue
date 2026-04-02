@@ -61,6 +61,15 @@
           >
             {{ isGeneratingSchedule ? 'Создаем...' : 'Создать расписание' }}
           </button>
+
+          <button
+            v-if="canPublishCurrentSchedule"
+            class="publish-schedule-button"
+            :disabled="isPublishingSchedule"
+            @click="handlePublishSchedule"
+          >
+            {{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}
+          </button>
         </div>
 
         <div class="schedule-info-row">
@@ -158,7 +167,7 @@
 <script>
 import '../assets/forecast.css'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { fetchScheduleForMonth, generateSchedule } from '../services/schedule'
+import { fetchScheduleForMonth, generateSchedule, publishSchedule } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 
@@ -185,6 +194,7 @@ export default {
       menuOpen: false,
       currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
       currentScheduleId: null,
+      currentScheduleStatus: null,
       selectedWaiter: '',
       weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
       scheduleRaw: [],
@@ -194,6 +204,7 @@ export default {
       isLoadingSchedule: false,
       isMonthSwitching: false,
       isGeneratingSchedule: false,
+      isPublishingSchedule: false,
       user: (() => {
         try {
           return JSON.parse(localStorage.getItem('user')) || { role: '' }
@@ -216,8 +227,20 @@ export default {
     hasSchedule() {
       return this.scheduleExists
     },
+    canPublishCurrentSchedule() {
+      return (
+        this.canManageSchedule &&
+        this.hasSchedule &&
+        !!this.currentScheduleId &&
+        this.currentScheduleStatus === 'draft'
+      )
+    },
     roleHint() {
       if (this.canManageSchedule) {
+        if (this.currentScheduleStatus === 'draft') {
+          return 'Открылся черновик расписания. Проверьте его и затем опубликуйте.'
+        }
+
         return 'Выберите сотрудника и посмотрите его рабочие дни'
       }
 
@@ -421,11 +444,13 @@ export default {
         this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []
         this.scheduleExists = Boolean(schedule.scheduleExists)
         this.currentScheduleId = schedule.scheduleId || null
+        this.currentScheduleStatus = schedule.scheduleStatus || null
         this.syncSelectedWaiter()
       } catch (error) {
         this.scheduleRaw = []
         this.scheduleExists = false
         this.currentScheduleId = null
+        this.currentScheduleStatus = null
         this.scheduleError = error.message || 'Не удалось загрузить расписание'
         this.syncSelectedWaiter()
       } finally {
@@ -520,6 +545,29 @@ export default {
         this.scheduleError = error.message || 'Не удалось создать расписание'
       } finally {
         this.isGeneratingSchedule = false
+      }
+    },
+    async handlePublishSchedule() {
+      if (this.isPublishingSchedule || !this.currentScheduleId) {
+        return
+      }
+
+      this.isPublishingSchedule = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+
+      try {
+        await publishSchedule({
+          scheduleId: this.currentScheduleId,
+          monthDate: this.currentMonth
+        })
+
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.scheduleNotice = 'Расписание опубликовано.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось опубликовать расписание'
+      } finally {
+        this.isPublishingSchedule = false
       }
     },
     buildCalendarDay(date, isCurrentMonth) {

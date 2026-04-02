@@ -361,12 +361,16 @@ const normalizeScheduleCollection = (payload) => {
   const rawItems = extractScheduleItems(payload)
   const scheduleId = extractScheduleId(payload)
   const explicitExists = firstDefined(payload?.exists, payload?.has_schedule, payload?.hasSchedule)
+  const scheduleStatus = String(
+    firstDefined(payload?.status, payload?.state, payload?.schedule?.status, payload?.schedule?.state, '')
+  ).toLowerCase() || null
 
   if (rawItems.length === 0) {
     return {
       entries: [],
       scheduleExists: Boolean(explicitExists || scheduleId),
-      scheduleId
+      scheduleId,
+      scheduleStatus
     }
   }
 
@@ -375,7 +379,8 @@ const normalizeScheduleCollection = (payload) => {
   return {
     entries,
     scheduleExists: true,
-    scheduleId
+    scheduleId,
+    scheduleStatus
   }
 }
 
@@ -580,7 +585,8 @@ const fetchMockScheduleForMonth = ({ monthDate }) => {
     return {
       entries: saved[range.monthKey].entries,
       scheduleExists: saved[range.monthKey].entries.length > 0,
-      scheduleId: saved[range.monthKey].scheduleId
+      scheduleId: saved[range.monthKey].scheduleId,
+      scheduleStatus: saved[range.monthKey].status || 'draft'
     }
   }
 
@@ -593,7 +599,8 @@ const fetchMockScheduleForMonth = ({ monthDate }) => {
     return {
       entries: [],
       scheduleExists: false,
-      scheduleId: null
+      scheduleId: null,
+      scheduleStatus: null
     }
   }
 
@@ -604,7 +611,8 @@ const fetchMockScheduleForMonth = ({ monthDate }) => {
   return {
     entries,
     scheduleExists: entries.length > 0,
-    scheduleId
+    scheduleId,
+    scheduleStatus: 'draft'
   }
 }
 
@@ -613,7 +621,7 @@ const generateMockSchedule = ({ user, monthDate = new Date() }) => {
   const entries = generateMockEntriesForMonth(monthDate)
   const scheduleId = `mock-${range.monthKey}`
 
-  storeMockMonth(range.monthKey, { scheduleId, entries })
+  storeMockMonth(range.monthKey, { scheduleId, entries, status: 'draft' })
 
   return {
     schedule_id: scheduleId,
@@ -644,7 +652,8 @@ export const fetchScheduleForMonth = async ({
       return {
         entries: [],
         scheduleExists: false,
-        scheduleId: null
+        scheduleId: null,
+        scheduleStatus: null
       }
     }
 
@@ -655,7 +664,8 @@ export const fetchScheduleForMonth = async ({
       return {
         entries: [],
         scheduleExists: true,
-        scheduleId: null
+        scheduleId: null,
+        scheduleStatus: status.status
       }
     }
 
@@ -688,5 +698,35 @@ export const generateSchedule = async ({ user, monthDate = new Date() } = {}) =>
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось запустить генерацию расписания'))
+  }
+}
+
+export const publishSchedule = async ({ scheduleId, monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для публикации')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (monthData && monthData.scheduleId === scheduleId) {
+      saved[range.monthKey] = {
+        ...monthData,
+        status: 'published'
+      }
+
+      localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    }
+
+    return { schedule_id: scheduleId, status: 'published' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/monthly/${scheduleId}/publish/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось опубликовать расписание'))
   }
 }
