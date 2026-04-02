@@ -877,3 +877,26 @@ export const unassignScheduleSlot = async ({ slotId } = {}) => {
     throw new Error(extractErrorMessage(error, 'Не удалось открепиться от места'))
   }
 }
+
+export const assignScheduleSlot = async ({ slotId, employeeId } = {}) => {
+  if (!slotId) {
+    throw new Error('Не удалось определить слот для назначения')
+  }
+
+  if (!employeeId) {
+    throw new Error('Не удалось определить сотрудника для назначения')
+  }
+
+  if (USE_MOCK_AUTH) {
+    return { slot_id: slotId, employee_id: employeeId, status: 'assigned' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/slots/${slotId}/assign/`, {
+      employee_id: employeeId
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось назначить сотрудника на место'))
+  }
+}

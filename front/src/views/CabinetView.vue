@@ -86,6 +86,7 @@
               </div>
 
               <button
+                v-if="currentUserRole === 'admin'"
                 class="notification-read-button"
                 @click="markNotificationAsRead(notification.id)"
               >
@@ -481,7 +482,11 @@ export default {
         }
 
         if (this.currentUserRole === 'admin') {
-          return true
+          return notification.audience === 'admin' || !notification.audience
+        }
+
+        if (notification.audience === 'admin') {
+          return false
         }
 
         return Number(notification.venue) === Number(currentVenueId)

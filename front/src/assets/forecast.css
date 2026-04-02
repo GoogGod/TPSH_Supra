@@ -209,6 +209,47 @@
   gap: 10px;
 }
 
+.slot-actions-buttons-single {
+  grid-template-columns: 1fr;
+}
+
+.assign-panel {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.assign-panel-field {
+  display: grid;
+  gap: 8px;
+}
+
+.assign-panel-field span {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14px;
+}
+
+.assign-panel-field select {
+  width: 100%;
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.assign-panel-field select option {
+  color: #0f173d;
+  background: #ffffff;
+}
+
+.assign-panel-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .claim-slot-button,
 .unassign-slot-button {
   min-height: 48px;
@@ -528,6 +569,10 @@
   }
 
   .slot-actions-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .assign-panel-actions {
     grid-template-columns: 1fr;
   }
 }
