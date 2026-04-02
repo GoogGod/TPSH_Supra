@@ -76,7 +76,7 @@ const mockUsers = [
       first_name: 'Иван',
       last_name: 'Петров',
       phone: '+79990001122',
-      role: 'MANAGER',
+      role: 'manager',
       venue: 1,
       schedule_pattern: '5/2',
       shift_duration: '12 часов'
@@ -91,7 +91,7 @@ const mockUsers = [
       first_name: 'Алексей',
       last_name: 'Сидоров',
       phone: '+79990003344',
-      role: 'WAITER',
+      role: 'employee_noob',
       venue: 1,
       schedule_pattern: '2/2',
       shift_duration: '12 часов'

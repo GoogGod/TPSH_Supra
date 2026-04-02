@@ -225,6 +225,11 @@
   gap: 6px;
 }
 
+.waiter-button.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .waiter-button.active {
   background: rgba(255, 255, 255, 0.1);
 }

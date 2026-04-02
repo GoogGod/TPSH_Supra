@@ -444,6 +444,13 @@
   font-size: 15px;
 }
 
+.copyable-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
 .form-field-full {
   grid-column: 1 / -1;
 }
@@ -464,6 +471,38 @@
   background: rgba(73, 209, 125, 0.16);
   border: 1px solid rgba(73, 209, 125, 0.32);
   color: #d8ffe6;
+}
+
+.copy-notice {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(73, 209, 125, 0.16);
+  border: 1px solid rgba(73, 209, 125, 0.32);
+  color: #d8ffe6;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.copy-button {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.copy-button-wide {
+  width: 100%;
+}
+
+.copy-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .form-actions {
@@ -597,6 +636,10 @@
 
   .modal-card {
     padding: 16px;
+  }
+
+  .copyable-input-row {
+    grid-template-columns: 1fr;
   }
 }
 .form-field select option {

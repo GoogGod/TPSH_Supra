@@ -93,8 +93,12 @@
               v-for="waiter in waiters"
               :key="waiter.employee_key"
               class="waiter-button"
-              :class="{ active: waiter.employee_key === selectedWaiter }"
+              :class="{
+                active: waiter.employee_key === selectedWaiter,
+                disabled: !canSelectWaiter(waiter)
+              }"
               :style="getWaiterButtonStyle(waiter)"
+              :disabled="!canSelectWaiter(waiter)"
               @click="selectWaiter(waiter.employee_key)"
             >
               <span class="waiter-button-name">{{ waiter.label }}</span>
@@ -271,6 +275,14 @@ export default {
 
       return matchedWaiter?.employee_key || ''
     },
+    currentWaiterGrade() {
+      if (this.currentUserRole === 'employee_noob' || this.currentUserRole === 'employee_pro') {
+        return this.currentUserRole
+      }
+
+      const pinnedWaiter = this.waiters.find((waiter) => waiter.employee_key === this.pinnedWaiterKey)
+      return String(pinnedWaiter?.grade || '').toLowerCase()
+    },
     selectedWaiterScheduleMap() {
       const map = {}
 
@@ -414,6 +426,14 @@ export default {
         return
       }
 
+      if (this.selectedWaiter) {
+        const selectedWaiter = this.waiters.find((item) => item.employee_key === this.selectedWaiter)
+
+        if (selectedWaiter && !this.canSelectWaiter(selectedWaiter)) {
+          this.selectedWaiter = ''
+        }
+      }
+
       const hasSelectedWaiter = this.waiters.some(
         (item) => item.employee_key === this.selectedWaiter
       )
@@ -423,14 +443,25 @@ export default {
       }
 
       if (this.isWaiterView && this.pinnedWaiterKey) {
-        this.selectedWaiter = this.pinnedWaiterKey
-        return
+        const pinnedWaiter = this.waiters.find((item) => item.employee_key === this.pinnedWaiterKey)
+
+        if (pinnedWaiter && this.canSelectWaiter(pinnedWaiter)) {
+          this.selectedWaiter = this.pinnedWaiterKey
+          return
+        }
       }
 
-      this.selectedWaiter = this.waiters[0].employee_key
+      const firstAllowedWaiter = this.waiters.find((item) => this.canSelectWaiter(item))
+      this.selectedWaiter = firstAllowedWaiter?.employee_key || ''
     },
     selectWaiter(employeeKey) {
       if (!employeeKey) {
+        return
+      }
+
+      const waiter = this.waiters.find((item) => item.employee_key === employeeKey)
+
+      if (waiter && !this.canSelectWaiter(waiter)) {
         return
       }
 
@@ -514,6 +545,23 @@ export default {
       }
 
       return ''
+    },
+    canSelectWaiter(waiter) {
+      if (!waiter) {
+        return false
+      }
+
+      if (!this.isWaiterView) {
+        return true
+      }
+
+      const currentGrade = String(this.currentWaiterGrade || '').toLowerCase()
+
+      if (currentGrade !== 'employee_noob' && currentGrade !== 'employee_pro') {
+        return true
+      }
+
+      return String(waiter.grade || '').toLowerCase() === currentGrade
     },
     getWaiterColor(employeeKey) {
       const key = String(employeeKey || '')

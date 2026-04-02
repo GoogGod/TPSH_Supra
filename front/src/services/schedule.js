@@ -13,7 +13,18 @@ const INACTIVE_STATUSES = new Set([
   'unassigned'
 ])
 
-const LIST_KEYS = ['results', 'items', 'data', 'entries', 'assignments', 'schedules']
+const LIST_KEYS = [
+  'results',
+  'items',
+  'data',
+  'entries',
+  'assignments',
+  'schedules',
+  'waiter_schedule',
+  'waiterSchedule',
+  'monthly_schedule',
+  'monthlySchedule'
+]
 
 const isObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -137,7 +148,9 @@ const normalizeEmployeeKey = (item, employee) => {
     item.employee_id,
     item.assigned_employee,
     item.waiter_id,
+    item.waiter_num,
     employee.employee_key,
+    employee.waiter_num,
     employee.id,
     employee.username,
     employee.email
@@ -289,7 +302,7 @@ const normalizeScheduleCollection = (payload) => {
 
   return {
     entries,
-    scheduleExists: entries.length > 0
+    scheduleExists: true
   }
 }
 

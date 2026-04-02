@@ -55,17 +55,22 @@
           <p><strong>Email:</strong> {{ user.email }}</p>
           <p><strong>Имя:</strong> {{ user.first_name }}</p>
           <p><strong>Фамилия:</strong> {{ user.last_name }}</p>
-          <p><strong>Телефон:</strong> {{ user.phone }}</p>
+          <p><strong>Телефон:</strong> {{ user.phone || 'Не указан' }}</p>
           <p><strong>Роль:</strong> {{ roleRu }}</p>
           <p><strong>Заведение:</strong> {{ currentVenueLabel }}</p>
         </div>
 
-        <div v-if="canManagePeople" class="manager-actions">
+        <div class="manager-actions">
           <button class="wide-button secondary" @click="openEmployeesModal">
-            Посмотреть роли
+            Посмотреть сотрудников
           </button>
-          <button class="wide-button secondary" @click="openCreateRoleModal">
-            Создать роль
+
+          <button
+            v-if="canManagePeople"
+            class="wide-button secondary"
+            @click="openCreateRoleModal"
+          >
+            Добавить сотрудника
           </button>
         </div>
       </section>
@@ -77,7 +82,7 @@
           <div class="modal-header">
             <div>
               <p class="modal-subtitle">Команда</p>
-              <h2 class="modal-title">Сотрудники и роли</h2>
+              <h2 class="modal-title">Сотрудники</h2>
             </div>
             <button class="modal-close" @click="closeEmployeesModal">×</button>
           </div>
@@ -92,7 +97,7 @@
               <strong class="role-stat-value">{{ groupedEmployees.manager.length }}</strong>
             </div>
             <div class="role-stat-card">
-              <span class="role-stat-label">Официанты-новички</span>
+              <span class="role-stat-label">Официанты-стажеры</span>
               <strong class="role-stat-value">{{ groupedEmployees.employee_noob.length }}</strong>
             </div>
             <div class="role-stat-card">
@@ -121,7 +126,7 @@
               </div>
 
               <div v-if="section.items.length === 0" class="employee-empty">
-                Нет сотрудников в этой роли
+                Нет сотрудников в этой группе
               </div>
 
               <div v-else class="employee-list">
@@ -164,6 +169,10 @@
 
             <div v-if="createRoleSuccess" class="form-alert success">
               {{ createRoleSuccess }}
+            </div>
+
+            <div v-if="copyNotice" class="copy-notice">
+              {{ copyNotice }}
             </div>
 
             <div class="form-grid">
@@ -215,7 +224,7 @@
                 <span>Пароль *</span>
                 <input
                   v-model="createRoleForm.password"
-                  type="password"
+                  type="text"
                   placeholder="********"
                   minlength="8"
                   required
@@ -227,13 +236,24 @@
                 <span>Подтверждение пароля *</span>
                 <input
                   v-model="createRoleForm.password_confirm"
-                  type="password"
+                  type="text"
                   placeholder="********"
                   minlength="8"
                   required
                   :disabled="isCreatingRole"
                 />
               </label>
+
+              <div class="form-field form-field-full">
+                <button
+                  type="button"
+                  class="copy-button copy-button-wide"
+                  :disabled="!createRoleForm.username || !createRoleForm.password || isCreatingRole"
+                  @click="copyCredentials"
+                >
+                  Скопировать логин и пароль
+                </button>
+              </div>
 
               <label class="form-field">
                 <span>Телефон</span>
@@ -316,7 +336,7 @@ import { fetchCurrentUser, logoutUser } from '../services/auth'
 const ROLE_LABELS = {
   admin: 'Администратор',
   manager: 'Менеджер',
-  employee_noob: 'Официант-новичок',
+  employee_noob: 'Официант-стажер',
   employee_pro: 'Официант-профи'
 }
 
@@ -380,6 +400,7 @@ export default {
       employeesError: '',
       createRoleError: '',
       createRoleSuccess: '',
+      copyNotice: '',
       employees: [],
       venues: [],
       createRoleForm: getDefaultCreateRoleForm(),
@@ -440,9 +461,15 @@ export default {
         return normalizedEmployees
       }
 
-      if (this.currentUserRole === 'manager') {
+      if (
+        this.currentUserRole === 'manager' ||
+        this.currentUserRole === 'employee_noob' ||
+        this.currentUserRole === 'employee_pro'
+      ) {
         return normalizedEmployees.filter(
-          (employee) => getVenueId(employee) !== null && getVenueId(employee) === this.currentVenueId
+          (employee) =>
+            normalizeRole(employee.role) === 'admin' ||
+            (getVenueId(employee) !== null && getVenueId(employee) === this.currentVenueId)
         )
       }
 
@@ -476,7 +503,7 @@ export default {
       return [
         { key: 'admin', title: 'Администраторы', items: this.groupedEmployees.admin },
         { key: 'manager', title: 'Менеджеры', items: this.groupedEmployees.manager },
-        { key: 'employee_noob', title: 'Официанты-новички', items: this.groupedEmployees.employee_noob },
+        { key: 'employee_noob', title: 'Официанты-стажеры', items: this.groupedEmployees.employee_noob },
         { key: 'employee_pro', title: 'Официанты-профи', items: this.groupedEmployees.employee_pro }
       ]
     }
@@ -502,6 +529,11 @@ export default {
 
     if (this.currentUserRole === 'admin') {
       await this.loadVenues()
+    }
+  },
+  beforeUnmount() {
+    if (this.copyNoticeTimer) {
+      clearTimeout(this.copyNoticeTimer)
     }
   },
   methods: {
@@ -577,6 +609,7 @@ export default {
     openCreateRoleModal() {
       this.createRoleError = ''
       this.createRoleSuccess = ''
+      this.copyNotice = ''
 
       this.createRoleForm = {
         ...getDefaultCreateRoleForm(),
@@ -598,6 +631,7 @@ export default {
       this.showCreateRoleModal = false
       this.createRoleError = ''
       this.createRoleSuccess = ''
+      this.copyNotice = ''
     },
     buildCreateRolePayload() {
       const payload = {
@@ -645,6 +679,40 @@ export default {
           .join('; ') || fallbackMessage
       )
     },
+    async copyText(value, successMessage) {
+      if (!value) {
+        return
+      }
+
+      try {
+        await navigator.clipboard.writeText(String(value))
+        this.showCopyNotice(successMessage)
+      } catch (error) {
+        this.showCopyNotice('Не удалось скопировать')
+      }
+    },
+    async copyCredentials() {
+      const username = this.createRoleForm.username?.trim()
+      const password = this.createRoleForm.password
+
+      if (!username || !password) {
+        return
+      }
+
+      const payload = `Логин: ${username}\nПароль: ${password}`
+      await this.copyText(payload, 'Логин и пароль скопированы')
+    },
+    showCopyNotice(message) {
+      this.copyNotice = message
+
+      if (this.copyNoticeTimer) {
+        clearTimeout(this.copyNoticeTimer)
+      }
+
+      this.copyNoticeTimer = setTimeout(() => {
+        this.copyNotice = ''
+      }, 1800)
+    },
     async submitCreateRole() {
       this.createRoleError = ''
       this.createRoleSuccess = ''
@@ -659,7 +727,6 @@ export default {
       try {
         await api.post('/auth/register/', this.buildCreateRolePayload())
         this.createRoleSuccess = 'Сотрудник успешно создан'
-        this.createRoleForm = getDefaultCreateRoleForm()
 
         if (this.showEmployeesModal) {
           await this.loadEmployees()
