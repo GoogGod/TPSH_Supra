@@ -377,9 +377,9 @@ export default {
     await this.loadSchedule()
   },
   methods: {
-    handleLogout() {
+    async handleLogout() {
       this.menuOpen = false
-      logoutUser()
+      await logoutUser()
       this.$router.replace('/login')
     },
     openMenu() {

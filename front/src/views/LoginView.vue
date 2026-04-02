@@ -1,41 +1,47 @@
 <template>
   <div class="auth-page">
-    <img src="/src/assets/S_height.png" alt="logo" class="top-right-image" />
+    <img src="/src/assets/S_height.png" alt="Supra" class="top-right-image" />
 
     <div class="supra-login-card">
       <h1>Авторизация</h1>
 
-      <form @submit.prevent="handleLogin">
-        <div v-if="errorMessage" class="error-message">
-          {{ errorMessage }}
-        </div>
+      <div class="auth-form-container">
+        <form class="auth-form-box" @submit.prevent="handleLogin">
+          <div v-if="errorMessage" class="error-message">
+            {{ errorMessage }}
+          </div>
 
-        <div class="input-group">
-          <label>Имя пользователя</label>
-          <input
-            v-model="username"
-            type="text"
-            required
-            placeholder="username"
-            :disabled="loading"
-          />
-        </div>
+          <div class="input-group">
+            <label for="username">Имя пользователя</label>
+            <input
+              id="username"
+              v-model="username"
+              type="text"
+              required
+              placeholder="username"
+              autocomplete="username"
+              :disabled="loading"
+            />
+          </div>
 
-        <div class="input-group">
-          <label>Пароль</label>
-          <input
-            v-model="password"
-            type="password"
-            required
-            placeholder="******"
-            :disabled="loading"
-          />
-        </div>
+          <div class="input-group">
+            <label for="password">Пароль</label>
+            <input
+              id="password"
+              v-model="password"
+              type="password"
+              required
+              placeholder="******"
+              autocomplete="current-password"
+              :disabled="loading"
+            />
+          </div>
 
-        <button type="submit" class="login-button" :disabled="loading">
-          {{ loading ? 'Вход...' : 'Войти' }}
-        </button>
-      </form>
+          <button type="submit" class="login-button" :disabled="loading">
+            {{ loading ? 'Вход...' : 'Войти' }}
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 </template>
@@ -44,8 +50,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
-import { API_BASE_URL } from '../api'
-import { fetchCurrentUser } from '../services/auth'
+import { loginUser } from '../services/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -109,20 +114,6 @@ const mockUsers = [
   }
 ]
 
-const extractLoginError = async (response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data === 'string') {
-      return data
-    }
-
-    return data.detail || data.message || 'Ошибка: неверный логин или пароль'
-  } catch (error) {
-    return 'Ошибка: неверный логин или пароль'
-  }
-}
-
 const handleMockLogin = async () => {
   const foundUser = mockUsers.find(
     (item) =>
@@ -143,37 +134,10 @@ const handleMockLogin = async () => {
 }
 
 const handleBackendLogin = async () => {
-  const response = await fetch(`${API_BASE_URL}/auth/login/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      username: username.value,
-      password: password.value
-    })
+  await loginUser({
+    username: username.value.trim(),
+    password: password.value
   })
-
-  if (!response.ok) {
-    throw new Error(await extractLoginError(response))
-  }
-
-  const data = await response.json()
-
-  if (!data.access || !data.refresh) {
-    throw new Error('Бэкенд не вернул access и refresh токены')
-  }
-
-  localStorage.setItem('access', data.access)
-  localStorage.setItem('refresh', data.refresh)
-  localStorage.setItem('isAuthenticated', 'true')
-
-  if (data.user) {
-    localStorage.setItem('user', JSON.stringify(data.user))
-  } else {
-    const freshUser = await fetchCurrentUser()
-    localStorage.setItem('user', JSON.stringify(freshUser))
-  }
 
   await router.push(route.query.redirect || '/cabinet')
 }

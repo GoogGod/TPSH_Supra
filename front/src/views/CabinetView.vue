@@ -11,7 +11,7 @@
     <transition name="side-menu">
       <aside v-if="menuOpen" class="side-menu">
         <div class="side-menu-top">
-          <button class="side-menu-close" @click="closeMenu">✕</button>
+          <button class="side-menu-close" @click="closeMenu">×</button>
         </div>
 
         <div class="side-menu-section">
@@ -57,16 +57,94 @@
           <p><strong>Фамилия:</strong> {{ user.last_name }}</p>
           <p><strong>Телефон:</strong> {{ user.phone }}</p>
           <p><strong>Роль:</strong> {{ roleRu }}</p>
-          <p><strong>Заведение:</strong> {{ user.venue_name || user.venue }}</p>
+          <p><strong>Заведение:</strong> {{ currentVenueLabel }}</p>
         </div>
 
-        <div v-if="canCreateRoles" class="manager-actions">
+        <div v-if="canManagePeople" class="manager-actions">
+          <button class="wide-button secondary" @click="openEmployeesModal">
+            Посмотреть роли
+          </button>
           <button class="wide-button secondary" @click="openCreateRoleModal">
             Создать роль
           </button>
         </div>
       </section>
     </main>
+
+    <transition name="modal-fade">
+      <div v-if="showEmployeesModal" class="modal-overlay" @click.self="closeEmployeesModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Команда</p>
+              <h2 class="modal-title">Сотрудники и роли</h2>
+            </div>
+            <button class="modal-close" @click="closeEmployeesModal">×</button>
+          </div>
+
+          <div class="role-groups">
+            <div class="role-stat-card">
+              <span class="role-stat-label">Админы</span>
+              <strong class="role-stat-value">{{ groupedEmployees.admin.length }}</strong>
+            </div>
+            <div class="role-stat-card">
+              <span class="role-stat-label">Менеджеры</span>
+              <strong class="role-stat-value">{{ groupedEmployees.manager.length }}</strong>
+            </div>
+            <div class="role-stat-card">
+              <span class="role-stat-label">Официанты-новички</span>
+              <strong class="role-stat-value">{{ groupedEmployees.employee_noob.length }}</strong>
+            </div>
+            <div class="role-stat-card">
+              <span class="role-stat-label">Официанты-профи</span>
+              <strong class="role-stat-value">{{ groupedEmployees.employee_pro.length }}</strong>
+            </div>
+          </div>
+
+          <div v-if="isLoadingEmployees" class="form-alert success">
+            Загружаем список сотрудников...
+          </div>
+
+          <div v-else-if="employeesError" class="form-alert error">
+            {{ employeesError }}
+          </div>
+
+          <div v-else class="employee-sections">
+            <section
+              v-for="section in employeeSections"
+              :key="section.key"
+              class="employee-section"
+            >
+              <div class="employee-section-head">
+                <h3>{{ section.title }}</h3>
+                <span>{{ section.items.length }}</span>
+              </div>
+
+              <div v-if="section.items.length === 0" class="employee-empty">
+                Нет сотрудников в этой роли
+              </div>
+
+              <div v-else class="employee-list">
+                <article
+                  v-for="employee in section.items"
+                  :key="employee.id || employee.username"
+                  class="employee-card"
+                >
+                  <div class="employee-card-head">
+                    <strong>{{ getEmployeeFullName(employee) }}</strong>
+                    <span class="employee-role-chip">{{ getRoleLabel(employee.role) }}</span>
+                  </div>
+                  <p>{{ employee.username }}</p>
+                  <p>{{ employee.email || 'Email не указан' }}</p>
+                  <p>{{ employee.phone || 'Телефон не указан' }}</p>
+                  <p>Заведение: {{ getVenueLabel(employee) }}</p>
+                </article>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <transition name="modal-fade">
       <div v-if="showCreateRoleModal" class="modal-overlay" @click.self="closeCreateRoleModal">
@@ -76,7 +154,7 @@
               <p class="modal-subtitle">{{ roleRu }}</p>
               <h2 class="modal-title">Создание сотрудника</h2>
             </div>
-            <button class="modal-close" @click="closeCreateRoleModal">✕</button>
+            <button class="modal-close" @click="closeCreateRoleModal">×</button>
           </div>
 
           <form class="role-form" @submit.prevent="submitCreateRole">
@@ -181,19 +259,19 @@
               </label>
 
               <label
-                v-if="String(user.role || '').toLowerCase() === 'manager'"
+                v-if="currentUserRole === 'manager'"
                 class="form-field form-field-full"
               >
                 <span>Заведение</span>
                 <input
-                  :value="user.venue_name || createRoleForm.venue_name"
+                  :value="currentVenueLabel"
                   type="text"
                   disabled
                 />
               </label>
 
               <label
-                v-if="String(user.role || '').toLowerCase() === 'admin'"
+                v-if="currentUserRole === 'admin'"
                 class="form-field form-field-full"
               >
                 <span>Заведение</span>
@@ -204,7 +282,7 @@
                     :key="venue.id"
                     :value="venue.id"
                   >
-                    {{ venue.venue_name }}
+                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
                   </option>
                 </select>
               </label>
@@ -235,6 +313,13 @@ import '../assets/cabinet.css'
 import api from '../api'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 
+const ROLE_LABELS = {
+  admin: 'Администратор',
+  manager: 'Менеджер',
+  employee_noob: 'Официант-новичок',
+  employee_pro: 'Официант-профи'
+}
+
 const getDefaultCreateRoleForm = () => ({
   username: '',
   password: '',
@@ -248,6 +333,33 @@ const getDefaultCreateRoleForm = () => ({
   venue_name: ''
 })
 
+const asArray = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+
+  if (Array.isArray(payload?.results)) {
+    return payload.results
+  }
+
+  if (Array.isArray(payload?.items)) {
+    return payload.items
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data
+  }
+
+  return []
+}
+
+const normalizeRole = (role) => String(role || '').toLowerCase()
+
+const getVenueId = (entity) => {
+  const raw = entity?.venue_id ?? entity?.venue?.id ?? entity?.venue
+  return raw === undefined || raw === null || raw === '' ? null : Number(raw)
+}
+
 export default {
   name: 'CabinetView',
   data() {
@@ -255,19 +367,22 @@ export default {
 
     try {
       savedUser = JSON.parse(localStorage.getItem('user') || 'null')
-    } catch (e) {
+    } catch (error) {
       savedUser = null
     }
 
     return {
       menuOpen: false,
-      activeTab: 'profile',
+      showEmployeesModal: false,
       showCreateRoleModal: false,
+      isLoadingEmployees: false,
       isCreatingRole: false,
+      employeesError: '',
       createRoleError: '',
       createRoleSuccess: '',
-      createRoleForm: getDefaultCreateRoleForm(),
+      employees: [],
       venues: [],
+      createRoleForm: getDefaultCreateRoleForm(),
       user: savedUser || {
         username: '',
         email: '',
@@ -281,45 +396,89 @@ export default {
     }
   },
   computed: {
-    isManager() {
-      return String(this.user.role || '').toLowerCase() === 'manager'
+    currentUserRole() {
+      return normalizeRole(this.user.role)
     },
-    canCreateRoles() {
-      const role = String(this.user.role || '').toLowerCase()
-      return role === 'manager' || role === 'admin'
+    canManagePeople() {
+      return this.currentUserRole === 'manager' || this.currentUserRole === 'admin'
+    },
+    currentVenueId() {
+      return getVenueId(this.user)
+    },
+    currentVenueLabel() {
+      return this.getVenueLabel(this.user)
     },
     roleRu() {
-      const role = String(this.user.role || '').toLowerCase()
-
-      const roles = {
-        manager: 'Менеджер',
-        admin: 'Администратор',
-        employee_noob: 'Официант-новичок',
-        employee_pro: 'Официант-профи'
-      }
-
-      return roles[role] || this.user.role || 'Не указано'
+      return ROLE_LABELS[this.currentUserRole] || this.user.role || 'Не указано'
     },
     availableRoleOptions() {
-      const role = String(this.user.role || '').toLowerCase()
-
-      if (role === 'manager') {
+      if (this.currentUserRole === 'manager') {
         return [
-          { value: 'employee_noob', label: 'Официант-новичок' },
-          { value: 'employee_pro', label: 'Официант-профи' }
+          { value: 'employee_noob', label: ROLE_LABELS.employee_noob },
+          { value: 'employee_pro', label: ROLE_LABELS.employee_pro }
         ]
       }
 
-      if (role === 'admin') {
+      if (this.currentUserRole === 'admin') {
         return [
-          { value: 'employee_noob', label: 'Официант-новичок' },
-          { value: 'employee_pro', label: 'Официант-профи' },
-          { value: 'manager', label: 'Менеджер' },
-          { value: 'admin', label: 'Администратор' }
+          { value: 'employee_noob', label: ROLE_LABELS.employee_noob },
+          { value: 'employee_pro', label: ROLE_LABELS.employee_pro },
+          { value: 'manager', label: ROLE_LABELS.manager },
+          { value: 'admin', label: ROLE_LABELS.admin }
         ]
       }
 
       return []
+    },
+    visibleEmployees() {
+      const normalizedEmployees = this.employees.filter((employee) => {
+        const role = normalizeRole(employee.role)
+        return ['admin', 'manager', 'employee_noob', 'employee_pro'].includes(role)
+      })
+
+      if (this.currentUserRole === 'admin') {
+        return normalizedEmployees
+      }
+
+      if (this.currentUserRole === 'manager') {
+        return normalizedEmployees.filter(
+          (employee) => getVenueId(employee) !== null && getVenueId(employee) === this.currentVenueId
+        )
+      }
+
+      return []
+    },
+    groupedEmployees() {
+      const groups = {
+        admin: [],
+        manager: [],
+        employee_noob: [],
+        employee_pro: []
+      }
+
+      this.visibleEmployees.forEach((employee) => {
+        const role = normalizeRole(employee.role)
+
+        if (groups[role]) {
+          groups[role].push(employee)
+        }
+      })
+
+      Object.keys(groups).forEach((key) => {
+        groups[key].sort((left, right) =>
+          this.getEmployeeFullName(left).localeCompare(this.getEmployeeFullName(right), 'ru')
+        )
+      })
+
+      return groups
+    },
+    employeeSections() {
+      return [
+        { key: 'admin', title: 'Администраторы', items: this.groupedEmployees.admin },
+        { key: 'manager', title: 'Менеджеры', items: this.groupedEmployees.manager },
+        { key: 'employee_noob', title: 'Официанты-новички', items: this.groupedEmployees.employee_noob },
+        { key: 'employee_pro', title: 'Официанты-профи', items: this.groupedEmployees.employee_pro }
+      ]
     }
   },
   async mounted() {
@@ -333,27 +492,55 @@ export default {
       if (savedUser) {
         try {
           this.user = JSON.parse(savedUser)
-        } catch (e) {
-          console.error('Ошибка чтения user из localStorage', e)
+        } catch (parseError) {
+          console.error('Ошибка чтения user из localStorage', parseError)
         }
       } else {
         console.error('Не удалось получить пользователя с бэка', error)
       }
     }
 
-    const role = String(this.user.role || '').toLowerCase()
-    if (role === 'admin') {
+    if (this.currentUserRole === 'admin') {
       await this.loadVenues()
     }
   },
   methods: {
+    getRoleLabel(role) {
+      return ROLE_LABELS[normalizeRole(role)] || role || 'Не указано'
+    },
+    getEmployeeFullName(employee) {
+      const fullName = [employee?.first_name, employee?.last_name].filter(Boolean).join(' ').trim()
+      return fullName || employee?.username || 'Без имени'
+    },
+    getVenueLabel(entity) {
+      return (
+        entity?.venue_name ||
+        entity?.venue?.venue_name ||
+        entity?.venue?.name ||
+        (getVenueId(entity) !== null ? `Заведение #${getVenueId(entity)}` : 'Не указано')
+      )
+    },
     async loadVenues() {
       try {
-        const response = await api.get('/api/v1/venues/')
-        this.venues = response.data || []
+        const response = await api.get('/venues/')
+        this.venues = asArray(response.data)
       } catch (error) {
         console.error('Не удалось загрузить заведения', error)
         this.venues = []
+      }
+    },
+    async loadEmployees() {
+      this.isLoadingEmployees = true
+      this.employeesError = ''
+
+      try {
+        const response = await api.get('/users/')
+        this.employees = asArray(response.data)
+      } catch (error) {
+        this.employees = []
+        this.employeesError = this.extractErrorMessage(error, 'Не удалось загрузить сотрудников')
+      } finally {
+        this.isLoadingEmployees = false
       }
     },
     openMenu() {
@@ -370,24 +557,34 @@ export default {
       this.menuOpen = false
       this.$router.push('/schedule')
     },
-    handleLogout() {
+    async handleLogout() {
       this.menuOpen = false
-      logoutUser()
+      await logoutUser()
       this.$router.replace('/login')
+    },
+    async openEmployeesModal() {
+      this.showEmployeesModal = true
+      await this.loadEmployees()
+    },
+    closeEmployeesModal() {
+      if (this.isLoadingEmployees) {
+        return
+      }
+
+      this.showEmployeesModal = false
+      this.employeesError = ''
     },
     openCreateRoleModal() {
       this.createRoleError = ''
       this.createRoleSuccess = ''
 
-      const currentUserRole = String(this.user.role || '').toLowerCase()
-
       this.createRoleForm = {
         ...getDefaultCreateRoleForm(),
-        venue: this.user.venue || '',
-        venue_name: this.user.venue_name || ''
+        venue: this.currentVenueId || '',
+        venue_name: this.currentVenueLabel
       }
 
-      if (currentUserRole === 'manager') {
+      if (this.currentUserRole === 'manager') {
         this.createRoleForm.role = 'employee_noob'
       }
 
@@ -403,8 +600,6 @@ export default {
       this.createRoleSuccess = ''
     },
     buildCreateRolePayload() {
-      const currentUserRole = String(this.user.role || '').toLowerCase()
-
       const payload = {
         username: this.createRoleForm.username,
         password: this.createRoleForm.password,
@@ -416,21 +611,21 @@ export default {
         role: this.createRoleForm.role || 'employee_noob'
       }
 
-      if (currentUserRole === 'admin') {
+      if (this.currentUserRole === 'admin') {
         if (this.createRoleForm.venue) {
           payload.venue = Number(this.createRoleForm.venue)
         }
-      } else if (currentUserRole === 'manager') {
-        payload.venue = Number(this.user.venue)
+      } else if (this.currentUserRole === 'manager' && this.currentVenueId !== null) {
+        payload.venue = this.currentVenueId
       }
 
       return payload
     },
-    extractErrorMessage(error) {
+    extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
 
       if (!data) {
-        return error?.message || 'Не удалось создать сотрудника'
+        return error?.message || fallbackMessage
       }
 
       if (typeof data === 'string') {
@@ -441,12 +636,14 @@ export default {
         return Array.isArray(data.detail) ? data.detail.join(', ') : data.detail
       }
 
-      return Object.entries(data)
-        .map(([key, value]) => {
-          const normalizedValue = Array.isArray(value) ? value.join(', ') : value
-          return `${key}: ${normalizedValue}`
-        })
-        .join('; ')
+      return (
+        Object.entries(data)
+          .map(([key, value]) => {
+            const normalizedValue = Array.isArray(value) ? value.join(', ') : value
+            return `${key}: ${normalizedValue}`
+          })
+          .join('; ') || fallbackMessage
+      )
     },
     async submitCreateRole() {
       this.createRoleError = ''
@@ -463,8 +660,12 @@ export default {
         await api.post('/auth/register/', this.buildCreateRolePayload())
         this.createRoleSuccess = 'Сотрудник успешно создан'
         this.createRoleForm = getDefaultCreateRoleForm()
+
+        if (this.showEmployeesModal) {
+          await this.loadEmployees()
+        }
       } catch (error) {
-        this.createRoleError = this.extractErrorMessage(error)
+        this.createRoleError = this.extractErrorMessage(error, 'Не удалось создать сотрудника')
       } finally {
         this.isCreatingRole = false
       }

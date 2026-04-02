@@ -472,6 +472,112 @@
   gap: 12px;
 }
 
+.role-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.role-stat-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.role-stat-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+
+.role-stat-value {
+  color: #ffffff;
+  font-size: 24px;
+}
+
+.employee-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.employee-section {
+  display: grid;
+  gap: 12px;
+}
+
+.employee-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #ffffff;
+}
+
+.employee-section-head h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.employee-section-head span {
+  min-width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 700;
+}
+
+.employee-empty {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.employee-list {
+  display: grid;
+  gap: 12px;
+}
+
+.employee-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.employee-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.88);
+  word-break: break-word;
+}
+
+.employee-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: #ffffff;
+}
+
+.employee-role-chip {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(73, 209, 125, 0.16);
+  border: 1px solid rgba(73, 209, 125, 0.3);
+  color: #d8ffe6;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.2s ease;
@@ -483,6 +589,7 @@
 }
 
 @media (max-width: 640px) {
+  .role-groups,
   .form-grid,
   .form-actions {
     grid-template-columns: 1fr;

@@ -1,6 +1,5 @@
 import api from '../api'
 
-const FALLBACK_GET_STATUSES = new Set([400, 404, 405])
 const INACTIVE_STATUSES = new Set([
   'cancelled',
   'canceled',
@@ -12,15 +11,12 @@ const INACTIVE_STATUSES = new Set([
 ])
 
 const LIST_KEYS = ['results', 'items', 'data', 'entries', 'assignments', 'schedules']
-const DETAIL_LIST_KEYS = ['slots', 'assignments', 'entries']
 
 const isObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const firstDefined = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== '')
-
-const asArray = (value) => (Array.isArray(value) ? value : [])
 
 const padNumber = (value) => String(value).padStart(2, '0')
 
@@ -34,7 +30,6 @@ const buildMonthRange = (monthDate = new Date()) => {
 
   return {
     month: currentMonth.getMonth() + 1,
-    monthKey: `${currentMonth.getFullYear()}-${padNumber(currentMonth.getMonth() + 1)}`,
     year: currentMonth.getFullYear(),
     startDate: formatDate(currentMonth),
     endDate: formatDate(lastDayOfMonth)
@@ -51,6 +46,7 @@ const normalizeDateValue = (value) => {
   }
 
   const normalized = String(value).trim()
+
   if (!normalized) {
     return ''
   }
@@ -68,6 +64,7 @@ const normalizeTimeValue = (value) => {
   }
 
   const raw = String(value).trim()
+
   if (!raw) {
     return ''
   }
@@ -124,11 +121,7 @@ const normalizeShiftType = (value, workStart, workEnd, workHours) => {
     }
 
     const startHours = Number(workStart.split(':')[0])
-    if (startHours < 13) {
-      return 'morning'
-    }
-
-    return 'evening'
+    return startHours < 13 ? 'morning' : 'evening'
   }
 
   return 'shift'
@@ -159,6 +152,7 @@ const buildEmployeeLabel = (item, employee, employeeKey) => {
   }
 
   const fullName = [employee.first_name, employee.last_name].filter(Boolean).join(' ').trim()
+
   if (fullName) {
     return fullName
   }
@@ -168,6 +162,7 @@ const buildEmployeeLabel = (item, employee, employeeKey) => {
   }
 
   const explicitWaiterNumber = firstDefined(item.waiter_num, employee.waiter_num)
+
   if (explicitWaiterNumber !== undefined && explicitWaiterNumber !== null && explicitWaiterNumber !== '') {
     return `Официант ${explicitWaiterNumber}`
   }
@@ -194,19 +189,12 @@ const extractList = (payload, keys = LIST_KEYS) => {
     if (Array.isArray(value)) {
       return value
     }
-
-    if (isObject(value)) {
-      const nested = extractList(value, keys)
-      if (nested.length > 0) {
-        return nested
-      }
-    }
   }
 
   return []
 }
 
-const normalizeScheduleEntry = (item, fallbackDate = '') => {
+const normalizeScheduleEntry = (item) => {
   if (!isObject(item)) {
     return null
   }
@@ -244,18 +232,15 @@ const normalizeScheduleEntry = (item, fallbackDate = '') => {
 
   const calculatedHours = getHoursDifference(workStart, workEnd)
   const rawHours = firstDefined(item.work_hours, shift.work_hours, calculatedHours)
-  const numericHours = rawHours === '' || rawHours === null || rawHours === undefined
-    ? null
-    : Number(rawHours)
+  const numericHours =
+    rawHours === '' || rawHours === null || rawHours === undefined ? null : Number(rawHours)
 
   const employeeKey = normalizeEmployeeKey(item, employee)
-  const date = normalizeDateValue(
-    firstDefined(item.date, shift.date, item.day?.date, fallbackDate)
-  )
+  const date = normalizeDateValue(firstDefined(item.date, shift.date))
   const status = String(
     firstDefined(item.status, item.assignment_status, item.slot_status, shift.status, '')
   ).toLowerCase()
-  const rawIsWorking = firstDefined(item.is_working, shift.is_working)
+  const rawIsWorking = firstDefined(item.is_working, shift.is_working, employeeKey ? true : false)
   const isWorkingValue =
     typeof rawIsWorking === 'boolean'
       ? rawIsWorking
@@ -292,146 +277,17 @@ const normalizeScheduleCollection = (payload) => {
   if (rawItems.length === 0) {
     return {
       entries: [],
-      scheduleExists: false,
-      recognizable: true
+      scheduleExists: false
     }
   }
 
-  const entries = rawItems
-    .map((item) => normalizeScheduleEntry(item))
-    .filter(Boolean)
+  const entries = rawItems.map((item) => normalizeScheduleEntry(item)).filter(Boolean)
 
   return {
     entries,
-    scheduleExists: rawItems.length > 0,
-    recognizable: entries.length > 0
+    scheduleExists: entries.length > 0
   }
 }
-
-const flattenMonthlyDetail = (payload) => {
-  if (!isObject(payload)) {
-    return []
-  }
-
-  const directItems = extractList(payload, DETAIL_LIST_KEYS)
-  const slotEntryItems = asArray(payload.slots).flatMap((slot) =>
-    asArray(slot?.entries).map((entry) => ({
-      ...slot,
-      ...entry,
-      employee_id: firstDefined(entry?.employee_id, slot?.employee_id, slot?.assigned_employee),
-      employee_label: firstDefined(
-        entry?.employee_label,
-        slot?.employee_label,
-        slot?.employee_name
-      ),
-      assignment_status: firstDefined(entry?.assignment_status, slot?.assignment_status),
-      waiter_num: firstDefined(entry?.waiter_num, slot?.waiter_num)
-    }))
-  )
-  const dayItems = asArray(payload.days).flatMap((day) =>
-    asArray(day?.slots).map((slot) => ({
-      ...slot,
-      date: firstDefined(slot?.date, day?.date)
-    }))
-  )
-
-  return [...slotEntryItems, ...dayItems, ...directItems]
-}
-
-const normalizeMonthlyDetail = (payload) => {
-  const rawItems = flattenMonthlyDetail(payload)
-  const entries = rawItems
-    .map((item) => normalizeScheduleEntry(item))
-    .filter(Boolean)
-
-  return {
-    entries,
-    scheduleExists: Boolean(payload?.id) || rawItems.length > 0,
-    recognizable: Boolean(payload?.id) || rawItems.length > 0
-  }
-}
-
-const extractScheduleId = (schedule) =>
-  firstDefined(schedule.id, schedule.schedule_id, schedule.monthly_schedule_id)
-
-const extractSchedulePeriod = (schedule) => {
-  const explicitYear = Number(firstDefined(schedule?.year, schedule?.schedule_year))
-  const explicitMonth = Number(firstDefined(schedule?.month, schedule?.schedule_month))
-
-  if (Number.isInteger(explicitYear) && Number.isInteger(explicitMonth)) {
-    return {
-      year: explicitYear,
-      month: explicitMonth
-    }
-  }
-
-  const rawPeriod = String(
-    firstDefined(schedule?.period, schedule?.start_date, schedule?.date, '')
-  )
-  const matchedPeriod = rawPeriod.match(/^(\d{4})-(\d{2})/)
-
-  if (!matchedPeriod) {
-    return {
-      year: null,
-      month: null
-    }
-  }
-
-  return {
-    year: Number(matchedPeriod[1]),
-    month: Number(matchedPeriod[2])
-  }
-}
-
-const pickMonthlySchedule = (schedules, monthDate) => {
-  if (!Array.isArray(schedules) || schedules.length === 0) {
-    return null
-  }
-
-  const targetYear = monthDate.getFullYear()
-  const targetMonth = monthDate.getMonth() + 1
-
-  const scoredSchedules = schedules
-    .map((schedule, index) => {
-      const { year, month } = extractSchedulePeriod(schedule)
-      const status = String(schedule.status || '').toLowerCase()
-      const monthMatches = year === targetYear && month === targetMonth
-      const score =
-        (monthMatches ? 100 : 0) +
-        (status === 'published' ? 20 : 0) +
-        (status === 'draft' ? 10 : 0) +
-        (schedules.length - index)
-
-      return {
-        schedule,
-        score
-      }
-    })
-    .sort((left, right) => right.score - left.score)
-
-  return scoredSchedules[0]?.schedule || null
-}
-
-const buildScheduleQueryParams = (monthDate, user) => {
-  const range = buildMonthRange(monthDate)
-  const venueId = firstDefined(user?.venue_id, user?.venue?.id, user?.venue)
-  const params = {
-    month: range.month,
-    year: range.year,
-    date_from: range.startDate,
-    date_to: range.endDate,
-    start_date: range.startDate,
-    end_date: range.endDate
-  }
-
-  if (venueId !== undefined && venueId !== null && venueId !== '') {
-    params.venue = venueId
-  }
-
-  return params
-}
-
-const shouldTryGetFallback = (error) => FALLBACK_GET_STATUSES.has(error?.response?.status)
 
 const extractErrorMessage = (error, fallbackMessage) => {
   const data = error?.response?.data
@@ -442,6 +298,7 @@ const extractErrorMessage = (error, fallbackMessage) => {
 
   if (typeof data === 'string') {
     const trimmed = data.trim()
+
     if (trimmed.startsWith('<!DOCTYPE html') || trimmed.startsWith('<html')) {
       return fallbackMessage
     }
@@ -453,58 +310,38 @@ const extractErrorMessage = (error, fallbackMessage) => {
     return Array.isArray(data.detail) ? data.detail.join(', ') : data.detail
   }
 
-  return Object.entries(data)
-    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
-    .join('; ') || fallbackMessage
+  return (
+    Object.entries(data)
+      .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
+      .join('; ') || fallbackMessage
+  )
+}
+
+const buildScheduleQueryParams = (monthDate, user) => {
+  const range = buildMonthRange(monthDate)
+  const venueId = firstDefined(user?.venue_id, user?.venue?.id, user?.venue)
+
+  const params = {
+    month: range.month,
+    year: range.year,
+    date_from: range.startDate,
+    date_to: range.endDate
+  }
+
+  if (venueId !== undefined && venueId !== null && venueId !== '') {
+    params.venue = venueId
+  }
+
+  return params
 }
 
 export const fetchScheduleForMonth = async ({ monthDate = new Date(), user = null } = {}) => {
-  const params = buildScheduleQueryParams(monthDate, user)
-
   try {
-    const response = await api.get('/schedule/', { params })
-    const normalized = normalizeScheduleCollection(response.data)
+    const response = await api.get('/schedule/', {
+      params: buildScheduleQueryParams(monthDate, user)
+    })
 
-    if (normalized.recognizable) {
-      return {
-        ...normalized,
-        source: '/schedule/'
-      }
-    }
-  } catch (error) {
-    if (!shouldTryGetFallback(error)) {
-      throw new Error(extractErrorMessage(error, 'Не удалось загрузить расписание'))
-    }
-  }
-
-  try {
-    const response = await api.get('/schedule/monthly/', { params })
-    const schedules = extractList(response.data)
-
-    if (schedules.length === 0) {
-      return {
-        entries: [],
-        scheduleExists: false,
-        source: '/schedule/monthly/'
-      }
-    }
-
-    const selectedSchedule = pickMonthlySchedule(schedules, monthDate)
-    const selectedScheduleId = extractScheduleId(selectedSchedule)
-
-    if (!selectedScheduleId) {
-      return {
-        entries: [],
-        scheduleExists: true,
-        source: '/schedule/monthly/'
-      }
-    }
-
-    const detailResponse = await api.get(`/schedule/monthly/${selectedScheduleId}/`)
-    return {
-      ...normalizeMonthlyDetail(detailResponse.data),
-      source: `/schedule/monthly/${selectedScheduleId}/`
-    }
+    return normalizeScheduleCollection(response.data)
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось загрузить расписание'))
   }
@@ -519,17 +356,6 @@ export const generateSchedule = async ({ user } = {}) => {
 
   try {
     const response = await api.post('/schedule/generate/', { venue: venueId })
-    return response.data
-  } catch (error) {
-    const status = error?.response?.status
-
-    if (status !== 404 && status !== 405) {
-      throw new Error(extractErrorMessage(error, 'Не удалось запустить генерацию расписания'))
-    }
-  }
-
-  try {
-    const response = await api.post('/forecast/generate-schedule/', { venue: venueId })
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось запустить генерацию расписания'))
