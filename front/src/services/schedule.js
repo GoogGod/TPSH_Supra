@@ -35,6 +35,10 @@ const isObject = (value) =>
 const firstDefined = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== '')
 
+const normalizeRole = (role) => String(role || '').toLowerCase()
+
+const normalizeScheduleStatus = (status) => String(status || '').trim().toLowerCase()
+
 const padNumber = (value) => String(value).padStart(2, '0')
 
 const formatDate = (date) =>
@@ -280,6 +284,16 @@ const extractScheduleId = (payload) =>
     payload?.current_schedule_id
   ) || null
 
+const extractScheduleStatus = (payload) =>
+  normalizeScheduleStatus(
+    firstDefined(
+      payload?.status,
+      payload?.state,
+      payload?.schedule?.status,
+      payload?.schedule?.state
+    )
+  ) || null
+
 const normalizeScheduleEntry = (item) => {
   if (!isObject(item)) {
     return null
@@ -361,9 +375,7 @@ const normalizeScheduleCollection = (payload) => {
   const rawItems = extractScheduleItems(payload)
   const scheduleId = extractScheduleId(payload)
   const explicitExists = firstDefined(payload?.exists, payload?.has_schedule, payload?.hasSchedule)
-  const scheduleStatus = String(
-    firstDefined(payload?.status, payload?.state, payload?.schedule?.status, payload?.schedule?.state, '')
-  ).toLowerCase() || null
+  const scheduleStatus = extractScheduleStatus(payload)
 
   if (rawItems.length === 0) {
     return {
@@ -430,7 +442,7 @@ const buildMonthQueryParams = (monthDate, user) => {
 
 const normalizeStatusResponse = (payload) => {
   const scheduleId = extractScheduleId(payload)
-  const rawStatus = String(firstDefined(payload?.status, payload?.state, '') || '').toLowerCase()
+  const rawStatus = extractScheduleStatus(payload)
   const explicitExists = firstDefined(payload?.exists, payload?.has_schedule, payload?.hasSchedule)
 
   const exists =
@@ -441,14 +453,37 @@ const normalizeStatusResponse = (payload) => {
   return {
     exists,
     scheduleId,
-    status: rawStatus || null
+    status: rawStatus
   }
 }
 
-const extractScheduleIdFromList = (payload) => {
+const extractScheduleRecords = (payload) => {
   const list = extractScheduleItems(payload)
-  const firstItem = list.find((item) => isObject(item))
-  return extractScheduleId(firstItem) || null
+
+  return list
+    .filter((item) => isObject(item))
+    .map((item) => ({
+      scheduleId: extractScheduleId(item),
+      status: extractScheduleStatus(item),
+      raw: item
+    }))
+    .filter((item) => item.scheduleId)
+}
+
+const pickScheduleRecord = (records, user) => {
+  const role = normalizeRole(user?.role)
+  const canViewDraft = role === 'manager' || role === 'admin'
+
+  if (canViewDraft) {
+    return (
+      records.find((item) => item.status === 'draft') ||
+      records.find((item) => item.status === 'published') ||
+      records[0] ||
+      null
+    )
+  }
+
+  return records.find((item) => item.status === 'published') || null
 }
 
 const fetchScheduleStatus = async ({ monthDate, user }) => {
@@ -469,12 +504,12 @@ const fetchScheduleDetail = async (scheduleId) => {
   }
 }
 
-const fetchScheduleIdFromMonthList = async ({ monthDate, user }) => {
+const fetchScheduleList = async ({ monthDate, user }) => {
   const response = await api.get('/schedule/monthly/', {
     params: buildMonthQueryParams(monthDate, user)
   })
 
-  return extractScheduleIdFromList(response.data)
+  return extractScheduleRecords(response.data)
 }
 
 const getStoredMockMonths = () => {
@@ -647,8 +682,12 @@ export const fetchScheduleForMonth = async ({
     }
 
     const status = await fetchScheduleStatus({ monthDate, user })
+    const scheduleRecords = await fetchScheduleList({ monthDate, user })
+    const selectedRecord = pickScheduleRecord(scheduleRecords, user)
+    const role = normalizeRole(user?.role)
+    const canViewDraft = role === 'manager' || role === 'admin'
 
-    if (!status.exists && !status.scheduleId) {
+    if (!status.exists && !selectedRecord && !status.scheduleId) {
       return {
         entries: [],
         scheduleExists: false,
@@ -657,19 +696,33 @@ export const fetchScheduleForMonth = async ({
       }
     }
 
-    const resolvedScheduleId =
-      status.scheduleId || (await fetchScheduleIdFromMonthList({ monthDate, user }))
+    if (!canViewDraft && status.status === 'draft' && !selectedRecord) {
+      return {
+        entries: [],
+        scheduleExists: false,
+        scheduleId: null,
+        scheduleStatus: null
+      }
+    }
+
+    const resolvedScheduleId = selectedRecord?.scheduleId || status.scheduleId || null
+    const resolvedScheduleStatus = selectedRecord?.status || status.status || null
 
     if (!resolvedScheduleId) {
       return {
         entries: [],
-        scheduleExists: true,
+        scheduleExists: canViewDraft ? Boolean(status.exists) : false,
         scheduleId: null,
-        scheduleStatus: status.status
+        scheduleStatus: resolvedScheduleStatus
       }
     }
 
-    return await fetchScheduleDetail(resolvedScheduleId)
+    const detail = await fetchScheduleDetail(resolvedScheduleId)
+
+    return {
+      ...detail,
+      scheduleStatus: detail.scheduleStatus || resolvedScheduleStatus
+    }
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось загрузить расписание'))
   }
