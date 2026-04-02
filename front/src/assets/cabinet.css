@@ -153,6 +153,43 @@
   gap: 12px;
 }
 
+.data-upload-card {
+  margin-top: 18px;
+  padding: 18px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 14px;
+}
+
+.data-upload-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.data-upload-subtitle {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.data-upload-title {
+  margin: 0;
+  color: #ffffff;
+  font-size: 22px;
+}
+
+.data-upload-copy {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.5;
+}
+
 .notifications-card {
   margin-top: 18px;
   padding: 18px 16px;
@@ -569,6 +606,47 @@
   color: #d8ffe6;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.upload-format-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.upload-format-note strong,
+.upload-format-note p {
+  margin: 0;
+}
+
+.upload-preview-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.upload-preview-card p {
+  margin: 0;
+}
+
+.upload-preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.upload-preview-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .copy-button {

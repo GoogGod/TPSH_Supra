@@ -114,7 +114,16 @@ import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateS
 import { pushProfileNotification } from '../services/profileNotifications'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
-const WAITER_COLORS = ['#c9839f','#7fa8d8','#72a9a2','#d89a7f','#9b90c8','#d7c07a','#86b592','#b18fc0']
+const WAITER_COLORS = [
+  '#b98597',
+  '#7898c2',
+  '#6f9b97',
+  '#c08d78',
+  '#9487bb',
+  '#b7aa72',
+  '#7ea88a',
+  '#a98bb3'
+]
 const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
 const asArray = (payload) => Array.isArray(payload) ? payload : Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.data) ? payload.data : []
