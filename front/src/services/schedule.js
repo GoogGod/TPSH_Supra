@@ -195,6 +195,31 @@ const buildAssignedEmployeeName = (item, employee) => {
   return employee.username || employee.email || ''
 }
 
+const extractEmployeeGrade = (item, employee) => {
+  const directGrade = firstDefined(
+    item.grade,
+    item.employee_grade,
+    item.employee_role,
+    employee.grade,
+    employee.role,
+    employee.position
+  )
+
+  if (directGrade) {
+    return directGrade
+  }
+
+  if (item.employee_pro === true) {
+    return 'employee_pro'
+  }
+
+  if (item.employee_noob === true) {
+    return 'employee_noob'
+  }
+
+  return null
+}
+
 const normalizeEmployeeKey = (item, employee) => {
   const raw = firstDefined(
     item.employee_key,
@@ -414,7 +439,7 @@ const normalizeScheduleEntry = (item) => {
     assigned_employee_id: firstDefined(item.assigned_employee_id, employee.id, null),
     assigned_employee_name: buildAssignedEmployeeName(item, employee),
     assigned_employee_username: employee.username || '',
-    grade: firstDefined(item.grade, item.employee_grade, employee.grade, employee.role, employee.position, null),
+    grade: extractEmployeeGrade(item, employee),
     shift_type: normalizeShiftType(
       firstDefined(item.shift_type, item.slot_type, item.type, shift.shift_type, shift.type),
       workStart,
