@@ -233,6 +233,38 @@ const extractScheduleItems = (payload) => {
     return []
   }
 
+  if (Array.isArray(payload.slots)) {
+    const slotEntries = payload.slots.flatMap((slot) => {
+      if (!isObject(slot)) {
+        return []
+      }
+
+      if (Array.isArray(slot.entries)) {
+        return slot.entries.map((entry) => {
+          if (!isObject(entry)) {
+            return entry
+          }
+
+          return {
+            ...slot,
+            ...entry,
+            slot_id: firstDefined(entry.slot_id, slot.id),
+            waiter_num: firstDefined(entry.waiter_num, slot.waiter_num),
+            assigned_employee: firstDefined(entry.assigned_employee, slot.assigned_employee),
+            employee_name: firstDefined(entry.employee_name, slot.employee_name),
+            assignment_status: firstDefined(entry.assignment_status, slot.assignment_status)
+          }
+        })
+      }
+
+      return []
+    })
+
+    if (slotEntries.length > 0) {
+      return slotEntries
+    }
+  }
+
   for (const key of DIRECT_LIST_KEYS) {
     if (Array.isArray(payload[key])) {
       return payload[key]

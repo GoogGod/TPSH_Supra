@@ -637,12 +637,17 @@ export default {
       }
 
       const currentGrade = String(this.currentWaiterGrade || '').toLowerCase()
+      const waiterGrade = String(waiter.grade || '').toLowerCase()
 
       if (currentGrade !== 'employee_noob' && currentGrade !== 'employee_pro') {
         return true
       }
 
-      return String(waiter.grade || '').toLowerCase() === currentGrade
+      if (!waiterGrade) {
+        return true
+      }
+
+      return waiterGrade === currentGrade
     },
     getWaiterColor(employeeKey) {
       const key = String(employeeKey || '')
