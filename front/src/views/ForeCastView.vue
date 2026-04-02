@@ -208,14 +208,14 @@ import { pushProfileNotification } from '../services/profileNotifications'
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 
 const WAITER_COLORS = [
-  '#f06292',
-  '#64b5f6',
-  '#4db6ac',
-  '#ff8a65',
-  '#9575cd',
-  '#ffd54f',
-  '#81c784',
-  '#ba68c8'
+  '#c9839f',
+  '#7fa8d8',
+  '#72a9a2',
+  '#d89a7f',
+  '#9b90c8',
+  '#d7c07a',
+  '#86b592',
+  '#b18fc0'
 ]
 
 const normalizeRole = (role) => String(role || '').toLowerCase()
