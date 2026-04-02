@@ -159,6 +159,12 @@
   background: rgba(120, 18, 18, 0.2);
 }
 
+.schedule-status-card.is-success {
+  border: 1px solid rgba(73, 209, 125, 0.32);
+  background: rgba(73, 209, 125, 0.16);
+  color: #d8ffe6;
+}
+
 .schedule-status-card.is-soft {
   background: rgba(255, 255, 255, 0.05);
   color: rgba(255, 255, 255, 0.78);

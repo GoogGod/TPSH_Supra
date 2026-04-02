@@ -13,18 +13,21 @@ const INACTIVE_STATUSES = new Set([
   'unassigned'
 ])
 
-const LIST_KEYS = [
+const DIRECT_LIST_KEYS = [
   'results',
   'items',
   'data',
   'entries',
   'assignments',
   'schedules',
+  'slots',
   'waiter_schedule',
   'waiterSchedule',
   'monthly_schedule',
   'monthlySchedule'
 ]
+
+const NESTED_DAY_KEYS = ['slots', 'entries', 'assignments', 'waiter_schedule', 'waiterSchedule']
 
 const isObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -142,11 +145,37 @@ const normalizeShiftType = (value, workStart, workEnd, workHours) => {
   return 'shift'
 }
 
+const extractEmployee = (item) => {
+  if (isObject(item.employee)) {
+    return item.employee
+  }
+
+  if (isObject(item.user)) {
+    return item.user
+  }
+
+  if (isObject(item.worker)) {
+    return item.worker
+  }
+
+  if (isObject(item.assigned_employee)) {
+    return item.assigned_employee
+  }
+
+  if (isObject(item.assignee)) {
+    return item.assignee
+  }
+
+  return {}
+}
+
 const normalizeEmployeeKey = (item, employee) => {
   const raw = firstDefined(
     item.employee_key,
     item.employee_id,
+    item.assigned_employee_id,
     item.assigned_employee,
+    item.employee,
     item.waiter_id,
     item.waiter_num,
     employee.employee_key,
@@ -191,7 +220,7 @@ const buildEmployeeLabel = (item, employee, employeeKey) => {
   return 'Сотрудник'
 }
 
-const extractList = (payload, keys = LIST_KEYS) => {
+const extractScheduleItems = (payload) => {
   if (Array.isArray(payload)) {
     return payload
   }
@@ -200,16 +229,56 @@ const extractList = (payload, keys = LIST_KEYS) => {
     return []
   }
 
-  for (const key of keys) {
-    const value = payload[key]
+  for (const key of DIRECT_LIST_KEYS) {
+    if (Array.isArray(payload[key])) {
+      return payload[key]
+    }
+  }
 
-    if (Array.isArray(value)) {
-      return value
+  if (Array.isArray(payload.days)) {
+    const nestedItems = payload.days.flatMap((day) => {
+      if (!isObject(day)) {
+        return []
+      }
+
+      for (const key of NESTED_DAY_KEYS) {
+        if (Array.isArray(day[key])) {
+          return day[key].map((item) => {
+            if (!isObject(item)) {
+              return item
+            }
+
+            return {
+              date: firstDefined(item.date, day.date, day.day, day.work_date),
+              ...item
+            }
+          })
+        }
+      }
+
+      if (firstDefined(day.date, day.day, day.work_date) !== undefined) {
+        return [day]
+      }
+
+      return []
+    })
+
+    if (nestedItems.length > 0) {
+      return nestedItems
     }
   }
 
   return []
 }
+
+const extractScheduleId = (payload) =>
+  firstDefined(
+    payload?.schedule_id,
+    payload?.id,
+    payload?.schedule?.schedule_id,
+    payload?.schedule?.id,
+    payload?.current_schedule_id
+  ) || null
 
 const normalizeScheduleEntry = (item) => {
   if (!isObject(item)) {
@@ -217,19 +286,14 @@ const normalizeScheduleEntry = (item) => {
   }
 
   const shift = isObject(item.shift) ? item.shift : {}
-  const employee = isObject(item.employee)
-    ? item.employee
-    : isObject(item.user)
-      ? item.user
-      : isObject(item.worker)
-        ? item.worker
-        : {}
+  const employee = extractEmployee(item)
 
   const workStart = normalizeTimeValue(
     firstDefined(
       item.work_start,
       item.start_time,
       item.starts_at,
+      item.slot_start,
       shift.work_start,
       shift.start_time,
       shift.starts_at
@@ -241,6 +305,7 @@ const normalizeScheduleEntry = (item) => {
       item.work_end,
       item.end_time,
       item.ends_at,
+      item.slot_end,
       shift.work_end,
       shift.end_time,
       shift.ends_at
@@ -253,9 +318,11 @@ const normalizeScheduleEntry = (item) => {
     rawHours === '' || rawHours === null || rawHours === undefined ? null : Number(rawHours)
 
   const employeeKey = normalizeEmployeeKey(item, employee)
-  const date = normalizeDateValue(firstDefined(item.date, shift.date))
+  const date = normalizeDateValue(
+    firstDefined(item.date, item.day, item.work_date, shift.date)
+  )
   const status = String(
-    firstDefined(item.status, item.assignment_status, item.slot_status, shift.status, '')
+    firstDefined(item.status, item.state, item.assignment_status, item.slot_status, shift.status, '')
   ).toLowerCase()
   const rawIsWorking = firstDefined(item.is_working, shift.is_working, employeeKey ? true : false)
   const isWorkingValue =
@@ -270,12 +337,14 @@ const normalizeScheduleEntry = (item) => {
 
   return {
     date,
+    slot_id: firstDefined(item.slot_id, item.id, shift.id, null),
     employee_key: employeeKey,
+    employee_id: firstDefined(item.employee_id, employee.id, null),
     employee_label: buildEmployeeLabel(item, employee, employeeKey),
     waiter_num: firstDefined(item.waiter_num, employee.waiter_num, employee.id, employeeKey),
-    grade: firstDefined(item.grade, employee.grade, employee.role, employee.position, null),
+    grade: firstDefined(item.grade, item.employee_grade, employee.grade, employee.role, employee.position, null),
     shift_type: normalizeShiftType(
-      firstDefined(item.shift_type, item.type, shift.shift_type, shift.type),
+      firstDefined(item.shift_type, item.slot_type, item.type, shift.shift_type, shift.type),
       workStart,
       workEnd,
       numericHours
@@ -289,12 +358,15 @@ const normalizeScheduleEntry = (item) => {
 }
 
 const normalizeScheduleCollection = (payload) => {
-  const rawItems = extractList(payload)
+  const rawItems = extractScheduleItems(payload)
+  const scheduleId = extractScheduleId(payload)
+  const explicitExists = firstDefined(payload?.exists, payload?.has_schedule, payload?.hasSchedule)
 
   if (rawItems.length === 0) {
     return {
       entries: [],
-      scheduleExists: false
+      scheduleExists: Boolean(explicitExists || scheduleId),
+      scheduleId
     }
   }
 
@@ -302,7 +374,8 @@ const normalizeScheduleCollection = (payload) => {
 
   return {
     entries,
-    scheduleExists: true
+    scheduleExists: true,
+    scheduleId
   }
 }
 
@@ -334,7 +407,7 @@ const extractErrorMessage = (error, fallbackMessage) => {
   )
 }
 
-const buildScheduleQueryParams = (monthDate, user) => {
+const buildMonthQueryParams = (monthDate, user) => {
   const range = buildMonthRange(monthDate)
   const venueId = firstDefined(user?.venue_id, user?.venue?.id, user?.venue)
 
@@ -348,6 +421,55 @@ const buildScheduleQueryParams = (monthDate, user) => {
   }
 
   return params
+}
+
+const normalizeStatusResponse = (payload) => {
+  const scheduleId = extractScheduleId(payload)
+  const rawStatus = String(firstDefined(payload?.status, payload?.state, '') || '').toLowerCase()
+  const explicitExists = firstDefined(payload?.exists, payload?.has_schedule, payload?.hasSchedule)
+
+  const exists =
+    typeof explicitExists === 'boolean'
+      ? explicitExists
+      : Boolean(scheduleId || (rawStatus && !['none', 'missing', 'empty', 'not_found'].includes(rawStatus)))
+
+  return {
+    exists,
+    scheduleId,
+    status: rawStatus || null
+  }
+}
+
+const extractScheduleIdFromList = (payload) => {
+  const list = extractScheduleItems(payload)
+  const firstItem = list.find((item) => isObject(item))
+  return extractScheduleId(firstItem) || null
+}
+
+const fetchScheduleStatus = async ({ monthDate, user }) => {
+  const response = await api.get('/schedule/status/', {
+    params: buildMonthQueryParams(monthDate, user)
+  })
+
+  return normalizeStatusResponse(response.data)
+}
+
+const fetchScheduleDetail = async (scheduleId) => {
+  const response = await api.get(`/schedule/monthly/${scheduleId}/`)
+  const normalized = normalizeScheduleCollection(response.data)
+
+  return {
+    ...normalized,
+    scheduleId: normalized.scheduleId || scheduleId
+  }
+}
+
+const fetchScheduleIdFromMonthList = async ({ monthDate, user }) => {
+  const response = await api.get('/schedule/monthly/', {
+    params: buildMonthQueryParams(monthDate, user)
+  })
+
+  return extractScheduleIdFromList(response.data)
 }
 
 const getStoredMockMonths = () => {
@@ -393,7 +515,9 @@ const createMockWaiters = () => [
 
 const buildMockShift = (date, waiter, shiftType, start, end, hours) => ({
   date,
+  slot_id: `${date}-${waiter.employee_key}-${shiftType}`,
   employee_key: waiter.employee_key,
+  employee_id: waiter.waiter_num,
   employee_label: waiter.employee_label,
   waiter_num: waiter.waiter_num,
   grade: waiter.grade,
@@ -429,7 +553,9 @@ const generateMockEntriesForMonth = (monthDate) => {
     if (day % 6 === 0) {
       entries.push({
         date,
+        slot_id: `${date}-open`,
         employee_key: '',
+        employee_id: null,
         employee_label: '',
         waiter_num: null,
         grade: null,
@@ -452,8 +578,9 @@ const fetchMockScheduleForMonth = ({ monthDate }) => {
 
   if (saved[range.monthKey]) {
     return {
-      entries: saved[range.monthKey],
-      scheduleExists: saved[range.monthKey].length > 0
+      entries: saved[range.monthKey].entries,
+      scheduleExists: saved[range.monthKey].entries.length > 0,
+      scheduleId: saved[range.monthKey].scheduleId
     }
   }
 
@@ -465,51 +592,82 @@ const fetchMockScheduleForMonth = ({ monthDate }) => {
   if (!sameMonth) {
     return {
       entries: [],
-      scheduleExists: false
+      scheduleExists: false,
+      scheduleId: null
     }
   }
 
   const entries = generateMockEntriesForMonth(monthDate)
-  storeMockMonth(range.monthKey, entries)
+  const scheduleId = `mock-${range.monthKey}`
+  storeMockMonth(range.monthKey, { scheduleId, entries })
 
   return {
     entries,
-    scheduleExists: entries.length > 0
+    scheduleExists: entries.length > 0,
+    scheduleId
   }
 }
 
-const generateMockSchedule = ({ user }) => {
-  const now = new Date()
-  const range = buildMonthRange(now)
-  const entries = generateMockEntriesForMonth(now)
+const generateMockSchedule = ({ user, monthDate = new Date() }) => {
+  const range = buildMonthRange(monthDate)
+  const entries = generateMockEntriesForMonth(monthDate)
+  const scheduleId = `mock-${range.monthKey}`
 
-  storeMockMonth(range.monthKey, entries)
+  storeMockMonth(range.monthKey, { scheduleId, entries })
 
   return {
-    created: entries.filter((item) => item.employee_key).length,
+    schedule_id: scheduleId,
+    slots_count: entries.length,
+    entries_count: entries.filter((item) => item.employee_key).length,
+    forecast_run_id: `mock-forecast-${range.monthKey}`,
     venue: firstDefined(user?.venue_id, user?.venue?.id, user?.venue, null)
   }
 }
 
-export const fetchScheduleForMonth = async ({ monthDate = new Date(), user = null } = {}) => {
+export const fetchScheduleForMonth = async ({
+  monthDate = new Date(),
+  user = null,
+  scheduleId = null
+} = {}) => {
   if (USE_MOCK_AUTH) {
     return fetchMockScheduleForMonth({ monthDate, user })
   }
 
   try {
-    const response = await api.get('/schedule/monthly/', {
-      params: buildScheduleQueryParams(monthDate, user)
-    })
+    if (scheduleId) {
+      return await fetchScheduleDetail(scheduleId)
+    }
 
-    return normalizeScheduleCollection(response.data)
+    const status = await fetchScheduleStatus({ monthDate, user })
+
+    if (!status.exists && !status.scheduleId) {
+      return {
+        entries: [],
+        scheduleExists: false,
+        scheduleId: null
+      }
+    }
+
+    const resolvedScheduleId =
+      status.scheduleId || (await fetchScheduleIdFromMonthList({ monthDate, user }))
+
+    if (!resolvedScheduleId) {
+      return {
+        entries: [],
+        scheduleExists: true,
+        scheduleId: null
+      }
+    }
+
+    return await fetchScheduleDetail(resolvedScheduleId)
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось загрузить расписание'))
   }
 }
 
-export const generateSchedule = async ({ user } = {}) => {
+export const generateSchedule = async ({ user, monthDate = new Date() } = {}) => {
   if (USE_MOCK_AUTH) {
-    return generateMockSchedule({ user })
+    return generateMockSchedule({ user, monthDate })
   }
 
   const venueId = firstDefined(user?.venue_id, user?.venue?.id, user?.venue)
@@ -518,8 +676,15 @@ export const generateSchedule = async ({ user } = {}) => {
     throw new Error('Не удалось определить объект для генерации расписания')
   }
 
+  const range = buildMonthRange(monthDate)
+
   try {
-    const response = await api.post('/schedule/generate/', { venue: venueId })
+    const response = await api.post('/schedule/generate/', {
+      venue: venueId,
+      year: range.year,
+      month: range.month
+    })
+
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось запустить генерацию расписания'))

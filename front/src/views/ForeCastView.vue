@@ -64,7 +64,10 @@
         </div>
 
         <div class="schedule-info-row">
-          <div v-if="isLoadingSchedule" class="schedule-status-card">
+          <div v-if="scheduleNotice" class="schedule-status-card is-success">
+            {{ scheduleNotice }}
+          </div>
+          <div v-else-if="isLoadingSchedule" class="schedule-status-card">
             Загружаем расписание...
           </div>
           <div v-else-if="scheduleError" class="schedule-status-card is-error">
@@ -102,9 +105,7 @@
               @click="selectWaiter(waiter.employee_key)"
             >
               <span class="waiter-button-name">{{ waiter.label }}</span>
-              <span class="waiter-button-meta">
-                {{ getWaiterMeta(waiter) }}
-              </span>
+              <span class="waiter-button-meta">{{ getWaiterMeta(waiter) }}</span>
             </button>
           </div>
         </div>
@@ -139,7 +140,7 @@
               <div v-if="day.shift" class="day-shift-mark">
                 <span class="shift-chip">{{ getShiftLabel(day.shift.shift_type) }}</span>
                 <span v-if="day.shift.work_start && day.shift.work_end" class="shift-caption">
-                  {{ day.shift.work_start }}–{{ day.shift.work_end }}
+                  {{ day.shift.work_start }}-{{ day.shift.work_end }}
                 </span>
               </div>
 
@@ -183,11 +184,13 @@ export default {
     return {
       menuOpen: false,
       currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+      currentScheduleId: null,
       selectedWaiter: '',
       weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
       scheduleRaw: [],
       scheduleExists: false,
       scheduleError: '',
+      scheduleNotice: '',
       isLoadingSchedule: false,
       isMonthSwitching: false,
       isGeneratingSchedule: false,
@@ -218,7 +221,7 @@ export default {
         return 'Выберите сотрудника и посмотрите его рабочие дни'
       }
 
-      return 'Нажмите на нужного официанта и календарь покажет его смены'
+      return 'Нажмите на нужного официанта, и календарь покажет его смены'
     },
     selectorTitle() {
       return this.canManageSchedule ? 'Сотрудники' : 'Официанты'
@@ -230,7 +233,7 @@ export default {
 
       return this.canManageSchedule
         ? 'Менеджер может переключаться между официантами и смотреть смены каждого'
-        : 'Нажмите на любого официанта, чтобы посмотреть его рабочие дни'
+        : 'Доступны только кнопки с той же ролью, что и у вас'
     },
     workingSchedule() {
       return this.scheduleRaw.filter((item) => item.is_working === true && item.employee_key)
@@ -242,12 +245,14 @@ export default {
         if (!grouped.has(item.employee_key)) {
           grouped.set(item.employee_key, {
             employee_key: item.employee_key,
+            employee_id: item.employee_id,
             waiter_num: item.waiter_num,
             label: item.employee_label || this.getFallbackEmployeeLabel(item),
             grade: item.grade || null,
             color: this.getWaiterColor(item.employee_key),
             identities: [
               normalizeIdentity(item.employee_key),
+              normalizeIdentity(item.employee_id),
               normalizeIdentity(item.waiter_num)
             ].filter(Boolean)
           })
@@ -378,7 +383,11 @@ export default {
       this.menuOpen = false
       this.$router.push('/cabinet')
     },
+    clearScheduleNotice() {
+      this.scheduleNotice = ''
+    },
     async prevMonth() {
+      this.clearScheduleNotice()
       this.currentMonth = new Date(
         this.currentMonth.getFullYear(),
         this.currentMonth.getMonth() - 1,
@@ -388,6 +397,7 @@ export default {
       await this.loadSchedule({ isMonthSwitching: true })
     },
     async nextMonth() {
+      this.clearScheduleNotice()
       this.currentMonth = new Date(
         this.currentMonth.getFullYear(),
         this.currentMonth.getMonth() + 1,
@@ -396,7 +406,7 @@ export default {
 
       await this.loadSchedule({ isMonthSwitching: true })
     },
-    async loadSchedule({ isMonthSwitching = false } = {}) {
+    async loadSchedule({ isMonthSwitching = false, scheduleId = null } = {}) {
       this.scheduleError = ''
       this.isLoadingSchedule = !isMonthSwitching
       this.isMonthSwitching = isMonthSwitching
@@ -404,15 +414,18 @@ export default {
       try {
         const schedule = await fetchScheduleForMonth({
           monthDate: this.currentMonth,
-          user: this.user
+          user: this.user,
+          scheduleId
         })
 
         this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []
         this.scheduleExists = Boolean(schedule.scheduleExists)
+        this.currentScheduleId = schedule.scheduleId || null
         this.syncSelectedWaiter()
       } catch (error) {
         this.scheduleRaw = []
         this.scheduleExists = false
+        this.currentScheduleId = null
         this.scheduleError = error.message || 'Не удалось загрузить расписание'
         this.syncSelectedWaiter()
       } finally {
@@ -473,18 +486,38 @@ export default {
       }
 
       this.isGeneratingSchedule = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
 
       try {
-        const response = await generateSchedule({ user: this.user })
-        const createdCount = Number(response?.created)
-        const successMessage = Number.isFinite(createdCount)
-          ? `Расписание создано. Новых смен: ${createdCount}.`
-          : 'Генерация расписания запущена.'
+        const response = await generateSchedule({
+          user: this.user,
+          monthDate: this.currentMonth
+        })
 
-        await this.loadSchedule()
-        window.alert(successMessage)
+        const scheduleId = response?.schedule_id || response?.scheduleId || null
+        const slotsCount = Number(response?.slots_count)
+        const entriesCount = Number(response?.entries_count)
+
+        if (scheduleId) {
+          await this.loadSchedule({ scheduleId })
+        } else {
+          await this.loadSchedule()
+        }
+
+        const parts = ['Черновик расписания создан']
+
+        if (Number.isFinite(slotsCount)) {
+          parts.push(`слотов: ${slotsCount}`)
+        }
+
+        if (Number.isFinite(entriesCount)) {
+          parts.push(`назначений: ${entriesCount}`)
+        }
+
+        this.scheduleNotice = parts.join(', ') + '.'
       } catch (error) {
-        window.alert(error.message || 'Не удалось создать расписание')
+        this.scheduleError = error.message || 'Не удалось создать расписание'
       } finally {
         this.isGeneratingSchedule = false
       }
