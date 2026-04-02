@@ -327,9 +327,7 @@ const buildScheduleQueryParams = (monthDate, user) => {
 
   const params = {
     month: range.month,
-    year: range.year,
-    date_from: range.startDate,
-    date_to: range.endDate
+    year: range.year
   }
 
   if (venueId !== undefined && venueId !== null && venueId !== '') {
@@ -486,7 +484,7 @@ export const fetchScheduleForMonth = async ({ monthDate = new Date(), user = nul
   }
 
   try {
-    const response = await api.get('/schedule/', {
+    const response = await api.get('/schedule/monthly/', {
       params: buildScheduleQueryParams(monthDate, user)
     })
 
