@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.generic import TemplateView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -37,3 +39,14 @@ urlpatterns = [
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/v1/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]
+
+if settings.FRONTEND_INDEX_FILE.exists():
+    spa_view = TemplateView.as_view(template_name="index.html")
+    urlpatterns += [
+        path("", spa_view, name="spa"),
+        re_path(
+            r"^(?!api/|admin/|static/)(?!.*\.[^/]+$).*$",
+            spa_view,
+            name="spa-fallback",
+        ),
+    ]

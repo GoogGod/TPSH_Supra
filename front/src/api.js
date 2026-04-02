@@ -1,7 +1,10 @@
 import axios from 'axios'
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+const normalizeBaseUrl = (value) => value.replace(/\/+$/, '')
+
+export const API_BASE_URL = normalizeBaseUrl(
+  import.meta.env.VITE_API_BASE_URL || '/api/v1'
+)
 
 const REFRESH_URL = '/auth/token/refresh/'
 

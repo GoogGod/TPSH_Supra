@@ -1,3 +1,13 @@
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /app/front
+
+COPY front/package.json front/package-lock.json ./
+RUN npm ci
+
+COPY front ./
+RUN npm run build
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -21,6 +31,7 @@ RUN pip install --upgrade pip && pip install -r /app/backend/requirements.txt
 
 COPY backend /app/backend
 COPY ml_data /app/ml_data
+COPY --from=frontend-builder /app/front/dist /app/backend/frontend_dist
 
 # Ensure writable dirs for generated ML artifacts inside container
 RUN mkdir -p /app/ml_data/data/raw \
