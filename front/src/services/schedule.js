@@ -173,13 +173,35 @@ const extractEmployee = (item) => {
   return {}
 }
 
+const asPrimitive = (value) => {
+  if (isObject(value) || Array.isArray(value)) {
+    return undefined
+  }
+
+  return value
+}
+
+const buildAssignedEmployeeName = (item, employee) => {
+  if (item.employee_name) {
+    return item.employee_name
+  }
+
+  const fullName = [employee.first_name, employee.last_name].filter(Boolean).join(' ').trim()
+
+  if (fullName) {
+    return fullName
+  }
+
+  return employee.username || employee.email || ''
+}
+
 const normalizeEmployeeKey = (item, employee) => {
   const raw = firstDefined(
     item.employee_key,
     item.employee_id,
     item.assigned_employee_id,
-    item.assigned_employee,
-    item.employee,
+    asPrimitive(item.assigned_employee),
+    asPrimitive(item.employee),
     item.waiter_id,
     item.waiter_num,
     employee.employee_key,
@@ -384,10 +406,14 @@ const normalizeScheduleEntry = (item) => {
   return {
     date,
     slot_id: firstDefined(item.slot_id, item.id, shift.id, null),
+    slot_position_key: String(firstDefined(item.slot_position_key, item.waiter_num, item.slot_id, employeeKey, '')),
     employee_key: employeeKey,
     employee_id: firstDefined(item.employee_id, employee.id, null),
     employee_label: buildEmployeeLabel(item, employee, employeeKey),
     waiter_num: firstDefined(item.waiter_num, employee.waiter_num, employee.id, employeeKey),
+    assigned_employee_id: firstDefined(item.assigned_employee_id, employee.id, null),
+    assigned_employee_name: buildAssignedEmployeeName(item, employee),
+    assigned_employee_username: employee.username || '',
     grade: firstDefined(item.grade, item.employee_grade, employee.grade, employee.role, employee.position, null),
     shift_type: normalizeShiftType(
       firstDefined(item.shift_type, item.slot_type, item.type, shift.shift_type, shift.type),
@@ -588,6 +614,7 @@ const createMockWaiters = () => [
 const buildMockShift = (date, waiter, shiftType, start, end, hours) => ({
   date,
   slot_id: `${date}-${waiter.employee_key}-${shiftType}`,
+  slot_position_key: waiter.employee_key,
   employee_key: waiter.employee_key,
   employee_id: waiter.waiter_num,
   employee_label: waiter.employee_label,
@@ -626,6 +653,7 @@ const generateMockEntriesForMonth = (monthDate) => {
       entries.push({
         date,
         slot_id: `${date}-open`,
+        slot_position_key: `${date}-open`,
         employee_key: '',
         employee_id: null,
         employee_label: '',
@@ -813,5 +841,39 @@ export const publishSchedule = async ({ scheduleId, monthDate = new Date() } = {
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось опубликовать расписание'))
+  }
+}
+
+export const claimScheduleSlot = async ({ slotId } = {}) => {
+  if (!slotId) {
+    throw new Error('Не удалось определить слот для закрепления')
+  }
+
+  if (USE_MOCK_AUTH) {
+    return { slot_id: slotId, status: 'assigned' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/slots/${slotId}/claim/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось закрепиться за местом'))
+  }
+}
+
+export const unassignScheduleSlot = async ({ slotId } = {}) => {
+  if (!slotId) {
+    throw new Error('Не удалось определить слот для открепления')
+  }
+
+  if (USE_MOCK_AUTH) {
+    return { slot_id: slotId, status: 'open' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/slots/${slotId}/unassign/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось открепиться от места'))
   }
 }

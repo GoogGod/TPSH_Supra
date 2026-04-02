@@ -60,6 +60,41 @@
           <p><strong>Заведение:</strong> {{ currentVenueLabel }}</p>
         </div>
 
+        <section v-if="canSeeClaimNotifications" class="notifications-card">
+          <div class="notifications-head">
+            <div>
+              <p class="notifications-subtitle">События</p>
+              <h2 class="notifications-title">Уведомления</h2>
+            </div>
+            <span class="notifications-count">{{ visibleNotifications.length }}</span>
+          </div>
+
+          <div v-if="visibleNotifications.length === 0" class="notifications-empty">
+            Пока нет новых уведомлений.
+          </div>
+
+          <div v-else class="notifications-list">
+            <article
+              v-for="notification in visibleNotifications"
+              :key="notification.id"
+              class="notification-item"
+            >
+              <div class="notification-copy">
+                <strong>{{ notification.title }}</strong>
+                <p>{{ notification.message }}</p>
+                <span>{{ formatNotificationDate(notification.created_at) }}</span>
+              </div>
+
+              <button
+                class="notification-read-button"
+                @click="markNotificationAsRead(notification.id)"
+              >
+                Отметить просмотренным
+              </button>
+            </article>
+          </div>
+        </section>
+
         <div class="manager-actions">
           <button class="wide-button secondary" @click="openEmployeesModal">
             Посмотреть сотрудников
@@ -332,6 +367,7 @@
 import '../assets/cabinet.css'
 import api from '../api'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
+import { getProfileNotifications, markProfileNotificationRead } from '../services/profileNotifications'
 
 const ROLE_LABELS = {
   admin: 'Администратор',
@@ -401,6 +437,7 @@ export default {
       createRoleError: '',
       createRoleSuccess: '',
       copyNotice: '',
+      notifications: [],
       employees: [],
       venues: [],
       createRoleForm: getDefaultCreateRoleForm(),
@@ -429,8 +466,26 @@ export default {
     currentVenueLabel() {
       return this.getVenueLabel(this.user)
     },
+    canSeeClaimNotifications() {
+      return this.currentUserRole === 'manager' || this.currentUserRole === 'admin'
+    },
     roleRu() {
       return ROLE_LABELS[this.currentUserRole] || this.user.role || 'Не указано'
+    },
+    visibleNotifications() {
+      const currentVenueId = this.currentVenueId
+
+      return this.notifications.filter((notification) => {
+        if (notification.read) {
+          return false
+        }
+
+        if (this.currentUserRole === 'admin') {
+          return true
+        }
+
+        return Number(notification.venue) === Number(currentVenueId)
+      })
     },
     availableRoleOptions() {
       if (this.currentUserRole === 'manager') {
@@ -530,6 +585,8 @@ export default {
     if (this.currentUserRole === 'admin') {
       await this.loadVenues()
     }
+
+    this.loadNotifications()
   },
   beforeUnmount() {
     if (this.copyNoticeTimer) {
@@ -537,6 +594,30 @@ export default {
     }
   },
   methods: {
+    loadNotifications() {
+      this.notifications = getProfileNotifications()
+    },
+    markNotificationAsRead(notificationId) {
+      markProfileNotificationRead(notificationId)
+      this.loadNotifications()
+    },
+    formatNotificationDate(value) {
+      if (!value) {
+        return ''
+      }
+
+      try {
+        return new Date(value).toLocaleString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      } catch (error) {
+        return String(value)
+      }
+    },
     getRoleLabel(role) {
       return ROLE_LABELS[normalizeRole(role)] || role || 'Не указано'
     },

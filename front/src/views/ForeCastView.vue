@@ -97,25 +97,54 @@
           </div>
 
           <div v-if="waiters.length === 0" class="waiter-empty-state">
-            Нет доступных официантов для отображения
+            Нет доступных мест для отображения
           </div>
 
           <div v-else class="waiter-button-list">
             <button
               v-for="waiter in waiters"
-              :key="waiter.employee_key"
+              :key="waiter.slot_position_key"
               class="waiter-button"
               :class="{
-                active: waiter.employee_key === selectedWaiter,
+                active: waiter.slot_position_key === selectedWaiter,
                 disabled: !canSelectWaiter(waiter)
               }"
               :style="getWaiterButtonStyle(waiter)"
               :disabled="!canSelectWaiter(waiter)"
-              @click="selectWaiter(waiter.employee_key)"
+              @click="selectWaiter(waiter.slot_position_key)"
             >
               <span class="waiter-button-name">{{ waiter.label }}</span>
               <span class="waiter-button-meta">{{ getWaiterMeta(waiter) }}</span>
             </button>
+          </div>
+
+          <div v-if="isWaiterView && selectedWaiterInfo" class="slot-actions-card">
+            <p class="slot-actions-title">{{ selectedWaiterInfo.label }}</p>
+            <p class="slot-actions-caption">
+              {{
+                selectedWaiterInfo.isClaimed && !selectedWaiterInfo.claimedByCurrentUser
+                  ? 'Это место уже занято другим сотрудником.'
+                  : 'Сначала выберите место, затем подтвердите закрепление.'
+              }}
+            </p>
+
+            <div class="slot-actions-buttons">
+              <button
+                class="claim-slot-button"
+                :disabled="!canClaimSelectedWaiter || isClaimingSlot || isUnassigningSlot"
+                @click="handleClaimSelectedWaiter"
+              >
+                {{ isClaimingSlot ? 'Закрепляем...' : 'Закрепиться' }}
+              </button>
+
+              <button
+                class="unassign-slot-button"
+                :disabled="!canUnassignSelectedWaiter || isClaimingSlot || isUnassigningSlot"
+                @click="handleUnassignSelectedWaiter"
+              >
+                {{ isUnassigningSlot ? 'Открепляем...' : 'Открепиться' }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -167,7 +196,14 @@
 <script>
 import '../assets/forecast.css'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { fetchScheduleForMonth, generateSchedule, publishSchedule } from '../services/schedule'
+import {
+  claimScheduleSlot,
+  fetchScheduleForMonth,
+  generateSchedule,
+  publishSchedule,
+  unassignScheduleSlot
+} from '../services/schedule'
+import { pushProfileNotification } from '../services/profileNotifications'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 
@@ -205,6 +241,8 @@ export default {
       isMonthSwitching: false,
       isGeneratingSchedule: false,
       isPublishingSchedule: false,
+      isClaimingSlot: false,
+      isUnassigningSlot: false,
       user: (() => {
         try {
           return JSON.parse(localStorage.getItem('user')) || { role: '' }
@@ -241,22 +279,22 @@ export default {
           return 'Открылся черновик расписания. Проверьте его и затем опубликуйте.'
         }
 
-        return 'Выберите сотрудника и посмотрите его рабочие дни'
+        return 'Выберите сотрудника и посмотрите его рабочие дни.'
       }
 
-      return 'Нажмите на нужного официанта, и календарь покажет его смены'
+      return 'Выберите место и закрепитесь за ним, если оно свободно.'
     },
     selectorTitle() {
-      return this.canManageSchedule ? 'Сотрудники' : 'Официанты'
+      return this.canManageSchedule ? 'Сотрудники' : 'Места'
     },
     selectorDescription() {
       if (this.waiters.length === 0) {
-        return 'Кнопки появятся, когда в расписании будут сотрудники'
+        return 'Кнопки появятся, когда в расписании будут доступные места.'
       }
 
       return this.canManageSchedule
-        ? 'Менеджер может переключаться между официантами и смотреть смены каждого'
-        : 'Доступны только кнопки с той же ролью, что и у вас'
+        ? 'Менеджер может переключаться между местами и смотреть смены по каждому.'
+        : 'Доступны только места вашей категории. После выбора можно закрепиться или открепиться.'
     },
     workingSchedule() {
       return this.scheduleRaw.filter((item) => item.is_working === true && item.employee_key)
@@ -265,18 +303,28 @@ export default {
       const grouped = new Map()
 
       this.workingSchedule.forEach((item) => {
-        if (!grouped.has(item.employee_key)) {
-          grouped.set(item.employee_key, {
+        const slotPositionKey = item.slot_position_key || item.employee_key
+
+        if (!grouped.has(slotPositionKey)) {
+          grouped.set(slotPositionKey, {
+            slot_position_key: slotPositionKey,
             employee_key: item.employee_key,
             employee_id: item.employee_id,
+            assigned_employee_id: item.assigned_employee_id,
+            assigned_employee_username: item.assigned_employee_username,
+            slot_id: item.slot_id,
             waiter_num: item.waiter_num,
             label: item.employee_label || this.getFallbackEmployeeLabel(item),
             grade: item.grade || null,
-            color: this.getWaiterColor(item.employee_key),
+            color: this.getWaiterColor(slotPositionKey),
+            isClaimed: Boolean(item.assigned_employee_id || item.assigned_employee_name),
+            claimedByCurrentUser: this.isCurrentUserAssignment(item),
             identities: [
               normalizeIdentity(item.employee_key),
               normalizeIdentity(item.employee_id),
-              normalizeIdentity(item.waiter_num)
+              normalizeIdentity(item.waiter_num),
+              normalizeIdentity(item.assigned_employee_id),
+              normalizeIdentity(item.assigned_employee_username)
             ].filter(Boolean)
           })
         }
@@ -287,7 +335,7 @@ export default {
       )
     },
     selectedWaiterInfo() {
-      return this.waiters.find((item) => item.employee_key === this.selectedWaiter) || null
+      return this.waiters.find((item) => item.slot_position_key === this.selectedWaiter) || null
     },
     pinnedWaiterKey() {
       const userIdentities = [
@@ -301,21 +349,21 @@ export default {
         waiter.identities.some((identity) => userIdentities.includes(identity))
       )
 
-      return matchedWaiter?.employee_key || ''
+      return matchedWaiter?.slot_position_key || ''
     },
     currentWaiterGrade() {
       if (this.currentUserRole === 'employee_noob' || this.currentUserRole === 'employee_pro') {
         return this.currentUserRole
       }
 
-      const pinnedWaiter = this.waiters.find((waiter) => waiter.employee_key === this.pinnedWaiterKey)
+      const pinnedWaiter = this.waiters.find((waiter) => waiter.slot_position_key === this.pinnedWaiterKey)
       return String(pinnedWaiter?.grade || '').toLowerCase()
     },
     selectedWaiterScheduleMap() {
       const map = {}
 
       this.workingSchedule
-        .filter((item) => item.employee_key === this.selectedWaiter)
+        .filter((item) => (item.slot_position_key || item.employee_key) === this.selectedWaiter)
         .forEach((item) => {
           map[item.date] = item
         })
@@ -332,6 +380,24 @@ export default {
         })
 
       return map
+    },
+    canClaimSelectedWaiter() {
+      if (!this.isWaiterView || !this.selectedWaiterInfo) {
+        return false
+      }
+
+      if (!this.canSelectWaiter(this.selectedWaiterInfo) || !this.selectedWaiterInfo.slot_id) {
+        return false
+      }
+
+      return !this.selectedWaiterInfo.isClaimed || this.selectedWaiterInfo.claimedByCurrentUser
+    },
+    canUnassignSelectedWaiter() {
+      if (!this.isWaiterView || !this.selectedWaiterInfo) {
+        return false
+      }
+
+      return Boolean(this.selectedWaiterInfo.slot_id && this.selectedWaiterInfo.claimedByCurrentUser)
     },
     monthTitle() {
       return this.currentMonth.toLocaleDateString('ru-RU', {
@@ -465,7 +531,7 @@ export default {
       }
 
       if (this.selectedWaiter) {
-        const selectedWaiter = this.waiters.find((item) => item.employee_key === this.selectedWaiter)
+        const selectedWaiter = this.waiters.find((item) => item.slot_position_key === this.selectedWaiter)
 
         if (selectedWaiter && !this.canSelectWaiter(selectedWaiter)) {
           this.selectedWaiter = ''
@@ -473,7 +539,7 @@ export default {
       }
 
       const hasSelectedWaiter = this.waiters.some(
-        (item) => item.employee_key === this.selectedWaiter
+        (item) => item.slot_position_key === this.selectedWaiter
       )
 
       if (hasSelectedWaiter) {
@@ -481,7 +547,7 @@ export default {
       }
 
       if (this.isWaiterView && this.pinnedWaiterKey) {
-        const pinnedWaiter = this.waiters.find((item) => item.employee_key === this.pinnedWaiterKey)
+        const pinnedWaiter = this.waiters.find((item) => item.slot_position_key === this.pinnedWaiterKey)
 
         if (pinnedWaiter && this.canSelectWaiter(pinnedWaiter)) {
           this.selectedWaiter = this.pinnedWaiterKey
@@ -490,20 +556,89 @@ export default {
       }
 
       const firstAllowedWaiter = this.waiters.find((item) => this.canSelectWaiter(item))
-      this.selectedWaiter = firstAllowedWaiter?.employee_key || ''
+      this.selectedWaiter = firstAllowedWaiter?.slot_position_key || ''
     },
-    selectWaiter(employeeKey) {
-      if (!employeeKey) {
+    selectWaiter(slotPositionKey) {
+      if (!slotPositionKey) {
         return
       }
 
-      const waiter = this.waiters.find((item) => item.employee_key === employeeKey)
+      const waiter = this.waiters.find((item) => item.slot_position_key === slotPositionKey)
 
       if (waiter && !this.canSelectWaiter(waiter)) {
         return
       }
 
-      this.selectedWaiter = employeeKey
+      this.selectedWaiter = slotPositionKey
+    },
+    getCurrentUserFullName() {
+      const fullName = [this.user.first_name, this.user.last_name].filter(Boolean).join(' ').trim()
+      return fullName || this.user.username || 'Сотрудник'
+    },
+    isCurrentUserAssignment(item) {
+      const userIdentities = [
+        normalizeIdentity(this.user.id),
+        normalizeIdentity(this.user.username),
+        normalizeIdentity(this.user.email)
+      ].filter(Boolean)
+
+      const assignmentIdentities = [
+        normalizeIdentity(item.employee_id),
+        normalizeIdentity(item.employee_key),
+        normalizeIdentity(item.assigned_employee_id),
+        normalizeIdentity(item.assigned_employee_username)
+      ].filter(Boolean)
+
+      return assignmentIdentities.some((identity) => userIdentities.includes(identity))
+    },
+    createManagerNotification(waiter) {
+      pushProfileNotification({
+        venue: this.user.venue_id || this.user.venue?.id || this.user.venue || null,
+        type: 'slot-claim',
+        title: 'Новое закрепление',
+        message: `${this.getCurrentUserFullName()} закрепился за местом ${waiter.waiter_num || waiter.label}.`,
+        schedule_id: this.currentScheduleId,
+        slot_id: waiter.slot_id
+      })
+    },
+    async handleClaimSelectedWaiter() {
+      if (!this.canClaimSelectedWaiter || !this.selectedWaiterInfo) {
+        return
+      }
+
+      this.isClaimingSlot = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+
+      try {
+        await claimScheduleSlot({ slotId: this.selectedWaiterInfo.slot_id })
+        this.createManagerNotification(this.selectedWaiterInfo)
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.scheduleNotice = 'Вы успешно закрепились за выбранным местом.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось закрепиться за местом'
+      } finally {
+        this.isClaimingSlot = false
+      }
+    },
+    async handleUnassignSelectedWaiter() {
+      if (!this.canUnassignSelectedWaiter || !this.selectedWaiterInfo) {
+        return
+      }
+
+      this.isUnassigningSlot = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+
+      try {
+        await unassignScheduleSlot({ slotId: this.selectedWaiterInfo.slot_id })
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.scheduleNotice = 'Вы открепились от выбранного места.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось открепиться от места'
+      } finally {
+        this.isUnassigningSlot = false
+      }
     },
     async handleCreateSchedule() {
       if (this.isGeneratingSchedule) {
@@ -600,19 +735,7 @@ export default {
       return item.employee_key ? `Сотрудник ${item.employee_key}` : 'Сотрудник'
     },
     getWaiterMeta(waiter) {
-      const parts = []
-
-      if (waiter.waiter_num || waiter.waiter_num === 0) {
-        parts.push(`#${waiter.waiter_num}`)
-      }
-
-      const gradeLabel = this.getGradeLabel(waiter.grade)
-
-      if (gradeLabel) {
-        parts.push(gradeLabel)
-      }
-
-      return parts.join(' · ') || 'Официант'
+      return this.getGradeLabel(waiter.grade) || 'Без категории'
     },
     getGradeLabel(grade) {
       const normalizedGrade = String(grade || '').toLowerCase()
@@ -622,7 +745,7 @@ export default {
       }
 
       if (normalizedGrade === 'employee_pro') {
-        return 'Профи'
+        return 'Профессионал'
       }
 
       return ''
@@ -649,9 +772,9 @@ export default {
 
       return waiterGrade === currentGrade
     },
-    getWaiterColor(employeeKey) {
-      const key = String(employeeKey || '')
-      const hash = key.split('').reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0)
+    getWaiterColor(key) {
+      const source = String(key || '')
+      const hash = source.split('').reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0)
 
       return WAITER_COLORS[hash % WAITER_COLORS.length]
     },
@@ -667,7 +790,7 @@ export default {
       return map[shiftType] || shiftType || ''
     },
     getWaiterButtonStyle(waiter) {
-      if (waiter.employee_key !== this.selectedWaiter) {
+      if (waiter.slot_position_key !== this.selectedWaiter) {
         return {}
       }
 
