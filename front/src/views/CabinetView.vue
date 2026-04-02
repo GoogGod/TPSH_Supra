@@ -226,7 +226,7 @@
               <label class="form-field">
                 <span>Подтверждение пароля *</span>
                 <input
-                  v-model="createRoleForm.password_confirmation"
+                  v-model="createRoleForm.password_confirm"
                   type="password"
                   placeholder="********"
                   minlength="8"
@@ -323,7 +323,7 @@ const ROLE_LABELS = {
 const getDefaultCreateRoleForm = () => ({
   username: '',
   password: '',
-  password_confirmation: '',
+  password_confirm: '',
   email: '',
   first_name: '',
   last_name: '',
@@ -603,7 +603,7 @@ export default {
       const payload = {
         username: this.createRoleForm.username,
         password: this.createRoleForm.password,
-        password_confirmation: this.createRoleForm.password_confirmation,
+        password_confirm: this.createRoleForm.password_confirm,
         email: this.createRoleForm.email,
         first_name: this.createRoleForm.first_name,
         last_name: this.createRoleForm.last_name,
@@ -649,7 +649,7 @@ export default {
       this.createRoleError = ''
       this.createRoleSuccess = ''
 
-      if (this.createRoleForm.password !== this.createRoleForm.password_confirmation) {
+      if (this.createRoleForm.password !== this.createRoleForm.password_confirm) {
         this.createRoleError = 'Пароли должны совпадать'
         return
       }

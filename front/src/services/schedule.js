@@ -1,5 +1,8 @@
 import api from '../api'
 
+const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
+const MOCK_SCHEDULE_STORAGE_KEY = 'mock_schedule_months'
+
 const INACTIVE_STATUSES = new Set([
   'cancelled',
   'canceled',
@@ -31,6 +34,7 @@ const buildMonthRange = (monthDate = new Date()) => {
   return {
     month: currentMonth.getMonth() + 1,
     year: currentMonth.getFullYear(),
+    monthKey: `${currentMonth.getFullYear()}-${padNumber(currentMonth.getMonth() + 1)}`,
     startDate: formatDate(currentMonth),
     endDate: formatDate(lastDayOfMonth)
   }
@@ -335,7 +339,152 @@ const buildScheduleQueryParams = (monthDate, user) => {
   return params
 }
 
+const getStoredMockMonths = () => {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_SCHEDULE_STORAGE_KEY) || '{}')
+  } catch (error) {
+    return {}
+  }
+}
+
+const storeMockMonth = (monthKey, value) => {
+  const saved = getStoredMockMonths()
+  saved[monthKey] = value
+  localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+}
+
+const createMockWaiters = () => [
+  {
+    employee_key: 'waiter',
+    employee_label: 'Официант 1',
+    waiter_num: 1,
+    grade: 'employee_noob'
+  },
+  {
+    employee_key: 'waiter-2',
+    employee_label: 'Официант 2',
+    waiter_num: 2,
+    grade: 'employee_pro'
+  },
+  {
+    employee_key: 'waiter-3',
+    employee_label: 'Официант 3',
+    waiter_num: 3,
+    grade: 'employee_noob'
+  },
+  {
+    employee_key: 'waiter-4',
+    employee_label: 'Официант 4',
+    waiter_num: 4,
+    grade: 'employee_pro'
+  }
+]
+
+const buildMockShift = (date, waiter, shiftType, start, end, hours) => ({
+  date,
+  employee_key: waiter.employee_key,
+  employee_label: waiter.employee_label,
+  waiter_num: waiter.waiter_num,
+  grade: waiter.grade,
+  shift_type: shiftType,
+  work_start: start,
+  work_end: end,
+  work_hours: hours,
+  is_working: true,
+  assignment_status: 'assigned'
+})
+
+const generateMockEntriesForMonth = (monthDate) => {
+  const range = buildMonthRange(monthDate)
+  const waiters = createMockWaiters()
+  const entries = []
+  const daysInMonth = Number(range.endDate.slice(-2))
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${range.year}-${padNumber(range.month)}-${padNumber(day)}`
+
+    waiters.forEach((waiter, index) => {
+      const cycle = (day + index) % 4
+
+      if (cycle === 0) {
+        entries.push(buildMockShift(date, waiter, 'morning', '09:00', '17:00', 8))
+      } else if (cycle === 1) {
+        entries.push(buildMockShift(date, waiter, 'evening', '15:00', '23:00', 8))
+      } else if (cycle === 2) {
+        entries.push(buildMockShift(date, waiter, 'full', '10:00', '22:00', 12))
+      }
+    })
+
+    if (day % 6 === 0) {
+      entries.push({
+        date,
+        employee_key: '',
+        employee_label: '',
+        waiter_num: null,
+        grade: null,
+        shift_type: 'morning',
+        work_start: '10:00',
+        work_end: '18:00',
+        work_hours: 8,
+        is_working: true,
+        assignment_status: 'open'
+      })
+    }
+  }
+
+  return entries
+}
+
+const fetchMockScheduleForMonth = ({ monthDate }) => {
+  const range = buildMonthRange(monthDate)
+  const saved = getStoredMockMonths()
+
+  if (saved[range.monthKey]) {
+    return {
+      entries: saved[range.monthKey],
+      scheduleExists: saved[range.monthKey].length > 0
+    }
+  }
+
+  const baseMonth = new Date()
+  const sameMonth =
+    monthDate.getFullYear() === baseMonth.getFullYear() &&
+    monthDate.getMonth() === baseMonth.getMonth()
+
+  if (!sameMonth) {
+    return {
+      entries: [],
+      scheduleExists: false
+    }
+  }
+
+  const entries = generateMockEntriesForMonth(monthDate)
+  storeMockMonth(range.monthKey, entries)
+
+  return {
+    entries,
+    scheduleExists: entries.length > 0
+  }
+}
+
+const generateMockSchedule = ({ user }) => {
+  const now = new Date()
+  const range = buildMonthRange(now)
+  const entries = generateMockEntriesForMonth(now)
+
+  storeMockMonth(range.monthKey, entries)
+
+  return {
+    created: entries.filter((item) => item.employee_key).length,
+    venue: firstDefined(user?.venue_id, user?.venue?.id, user?.venue, null)
+  }
+}
+
 export const fetchScheduleForMonth = async ({ monthDate = new Date(), user = null } = {}) => {
+  if (USE_MOCK_AUTH) {
+    return fetchMockScheduleForMonth({ monthDate, user })
+  }
+
   try {
     const response = await api.get('/schedule/', {
       params: buildScheduleQueryParams(monthDate, user)
@@ -348,6 +497,10 @@ export const fetchScheduleForMonth = async ({ monthDate = new Date(), user = nul
 }
 
 export const generateSchedule = async ({ user } = {}) => {
+  if (USE_MOCK_AUTH) {
+    return generateMockSchedule({ user })
+  }
+
   const venueId = firstDefined(user?.venue_id, user?.venue?.id, user?.venue)
 
   if (venueId === undefined || venueId === null || venueId === '') {
