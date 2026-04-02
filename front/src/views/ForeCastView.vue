@@ -1,9 +1,17 @@
 <template>
   <div class="forecast-page">
-    <transition name="menu-overlay"><div v-if="menuOpen" class="side-menu-overlay" @click="closeMenu"></div></transition>
+    <transition name="menu-overlay">
+      <div
+        v-if="menuOpen"
+        class="side-menu-overlay"
+        @click="closeMenu"
+      ></div>
+    </transition>
     <transition name="side-menu">
       <aside v-if="menuOpen" class="side-menu">
-        <div class="side-menu-top"><button class="side-menu-close" @click="closeMenu">×</button></div>
+                <div class="side-menu-top">
+          <button class="side-menu-close" @click="closeMenu">×</button>
+        </div>
         <div class="side-menu-section">
           <button class="side-menu-item" @click="goToProfile">Профиль</button>
           <button class="side-menu-item active" @click="closeMenu">Расписание</button>
@@ -14,8 +22,19 @@
     <main class="forecast-content">
       <section class="forecast-card">
         <div class="forecast-card-top">
-          <button class="menu-button" @click="openMenu" aria-label="Открыть меню"><span></span><span></span><span></span></button>
-          <div class="forecast-heading"><p class="forecast-subtitle">График работы</p><h1 class="forecast-title">Расписание</h1></div>
+                    <button
+            class="menu-button"
+            @click="openMenu"
+            aria-label="Открыть меню"
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+                    <div class="forecast-heading">
+            <p class="forecast-subtitle">График работы</p>
+            <h1 class="forecast-title">Расписание</h1>
+          </div>
         </div>
         <div class="month-toolbar">
           <div class="month-switcher">
@@ -34,7 +53,10 @@
           <div v-else class="schedule-status-card is-soft">{{ roleHint }}</div>
         </div>
         <div class="waiter-picker-card">
-          <div class="waiter-picker-head"><h2>Места</h2><p>{{ selectorDescription }}</p></div>
+                    <div class="waiter-picker-head">
+            <h2>Места</h2>
+            <p>{{ selectorDescription }}</p>
+          </div>
           <div v-if="waiters.length === 0" class="waiter-empty-state">Нет доступных мест для отображения</div>
           <div v-else class="waiter-button-list">
             <button v-for="waiter in waiters" :key="waiter.slot_position_key" class="waiter-button" :class="{ active: waiter.slot_position_key === selectedWaiter, disabled: !canSelectWaiter(waiter) }" :style="getWaiterButtonStyle(waiter)" :disabled="!canSelectWaiter(waiter)" @click="selectWaiter(waiter.slot_position_key)">
@@ -62,7 +84,15 @@
           </div>
         </div>
         <div class="calendar-card">
-          <div class="calendar-weekdays"><div v-for="weekday in weekdays" :key="weekday" class="weekday-cell">{{ weekday }}</div></div>
+                    <div class="calendar-weekdays">
+            <div
+              v-for="weekday in weekdays"
+              :key="weekday"
+              class="weekday-cell"
+            >
+              {{ weekday }}
+            </div>
+          </div>
           <div class="calendar-grid">
             <div v-for="day in calendarDays" :key="day.key" class="calendar-cell" :class="{ 'outside-month': !day.isCurrentMonth, 'is-working': !!day.shift, 'is-open-slot': !day.shift && day.hasOpenSlots, 'is-today': day.isToday, 'is-selected-waiter': !!day.shift }" :style="getDayStyle(day)">
               <div class="day-number">{{ day.date.getDate() }}</div>
@@ -156,3 +186,4 @@ export default {
   }
 }
 </script>
+
