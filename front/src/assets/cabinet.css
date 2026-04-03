@@ -684,6 +684,10 @@
   word-break: break-word;
 }
 
+.employee-card-actions {
+  margin-top: 6px;
+}
+
 .employee-card-head {
   display: flex;
   align-items: flex-start;
@@ -701,6 +705,22 @@
   color: #d8ffe6;
   font-size: 12px;
   font-weight: 700;
+}
+
+.employee-manage-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(125, 169, 255, 0.34);
+  border-radius: 14px;
+  background: rgba(93, 130, 255, 0.16);
+  color: #e7efff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.employee-manage-button:hover {
+  background: rgba(93, 130, 255, 0.24);
 }
 
 .modal-fade-enter-active,

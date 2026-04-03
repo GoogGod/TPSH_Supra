@@ -152,10 +152,98 @@
                   <p>{{ employee.email || 'Email не указан' }}</p>
                   <p>{{ employee.phone || 'Телефон не указан' }}</p>
                   <p>Заведение: {{ getVenueLabel(employee) }}</p>
+                  <div v-if="canAdminManageEmployee(employee)" class="employee-card-actions">
+                    <button class="employee-manage-button" type="button" @click="openManageEmployeeModal(employee)">
+                      Управление
+                    </button>
+                  </div>
                 </article>
               </div>
             </section>
           </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showManageEmployeeModal" class="modal-overlay" @click.self="closeManageEmployeeModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Admin</p>
+              <h2 class="modal-title">Управление сотрудником</h2>
+            </div>
+            <button class="modal-close" @click="closeManageEmployeeModal">×</button>
+          </div>
+
+          <form class="role-form" @submit.prevent="submitManageEmployee">
+            <div v-if="manageEmployeeError" class="form-alert error">
+              {{ manageEmployeeError }}
+            </div>
+
+            <div v-if="manageEmployeeSuccess" class="form-alert success">
+              {{ manageEmployeeSuccess }}
+            </div>
+
+            <div v-if="isLoadingManagedEmployee" class="form-alert success">
+              Загружаем данные сотрудника...
+            </div>
+
+            <div v-else class="form-grid">
+              <label class="form-field">
+                <span>Username *</span>
+                <input v-model.trim="manageEmployeeForm.username" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Email *</span>
+                <input v-model.trim="manageEmployeeForm.email" type="email" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Имя *</span>
+                <input v-model.trim="manageEmployeeForm.first_name" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Фамилия *</span>
+                <input v-model.trim="manageEmployeeForm.last_name" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Телефон</span>
+                <input v-model.trim="manageEmployeeForm.phone" type="tel" :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Роль *</span>
+                <select v-model="manageEmployeeForm.role" :disabled="isSavingManagedEmployee">
+                  <option v-for="option in availableRoleOptions" :key="`manage-role-${option.value}`" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="form-field form-field-full">
+                <span>Заведение</span>
+                <select v-model="manageEmployeeForm.venue" :disabled="isSavingManagedEmployee">
+                  <option value="">Без заведения</option>
+                  <option v-for="venue in venues" :key="`manage-venue-${venue.id}`" :value="venue.id">
+                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="wide-button secondary" :disabled="isSavingManagedEmployee || isLoadingManagedEmployee" @click="closeManageEmployeeModal">
+                Отмена
+              </button>
+              <button type="submit" class="wide-button" :disabled="isSavingManagedEmployee || isLoadingManagedEmployee || !manageEmployeeForm.id">
+                {{ isSavingManagedEmployee ? 'Сохраняем...' : 'Сохранить изменения' }}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </transition>
@@ -531,6 +619,17 @@ const getDefaultCreateVenueForm = () => ({
   is_active: true
 })
 
+const getDefaultManageEmployeeForm = () => ({
+  id: null,
+  username: '',
+  email: '',
+  first_name: '',
+  last_name: '',
+  phone: '',
+  role: 'employee_noob',
+  venue: ''
+})
+
 const asArray = (payload) => {
   if (Array.isArray(payload)) {
     return payload
@@ -575,14 +674,19 @@ export default {
     return {
       menuOpen: false,
       showEmployeesModal: false,
+      showManageEmployeeModal: false,
       showCreateRoleModal: false,
       showCreateVenueModal: false,
       showUploadDataModal: false,
       isLoadingEmployees: false,
+      isLoadingManagedEmployee: false,
       isCreatingRole: false,
       isCreatingVenue: false,
       isUploadingForecastData: false,
+      isSavingManagedEmployee: false,
       employeesError: '',
+      manageEmployeeError: '',
+      manageEmployeeSuccess: '',
       createRoleError: '',
       createRoleSuccess: '',
       createVenueError: '',
@@ -598,7 +702,9 @@ export default {
       forecastUploadFile: null,
       forecastUploadFileName: '',
       forecastUploadPreview: [],
+      managedEmployeeOriginal: null,
       createRoleForm: getDefaultCreateRoleForm(),
+      manageEmployeeForm: getDefaultManageEmployeeForm(),
       createVenueForm: getDefaultCreateVenueForm(),
       user: savedUser || {
         username: '',
@@ -740,6 +846,9 @@ export default {
       const fullName = [employee?.first_name, employee?.last_name].filter(Boolean).join(' ').trim()
       return fullName || employee?.username || 'Без имени'
     },
+    canAdminManageEmployee(employee) {
+      return this.currentUserRole === 'admin' && Boolean(employee?.id)
+    },
     getVenueLabel(entity) {
       return (
         entity?.venue_name ||
@@ -801,6 +910,59 @@ export default {
 
       this.showEmployeesModal = false
       this.employeesError = ''
+    },
+    async openManageEmployeeModal(employee) {
+      if (!this.canAdminManageEmployee(employee)) {
+        return
+      }
+
+      this.showManageEmployeeModal = true
+      this.isLoadingManagedEmployee = true
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.managedEmployeeOriginal = null
+      this.manageEmployeeForm = getDefaultManageEmployeeForm()
+
+      try {
+        if (!this.venues.length) {
+          await this.loadVenues()
+        }
+
+        const response = await api.get(`/users/${employee.id}/`)
+        const payload = response?.data || employee
+        const venueId = getVenueId(payload)
+        const normalizedRole = normalizeRole(payload.role) || 'employee_noob'
+
+        this.managedEmployeeOriginal = {
+          id: payload.id,
+          username: payload.username || '',
+          email: payload.email || '',
+          first_name: payload.first_name || '',
+          last_name: payload.last_name || '',
+          phone: payload.phone || '',
+          role: normalizedRole,
+          venue: venueId === null ? '' : venueId
+        }
+
+        this.manageEmployeeForm = {
+          ...this.managedEmployeeOriginal
+        }
+      } catch (error) {
+        this.manageEmployeeError = this.extractErrorMessage(error, 'Не удалось загрузить сотрудника')
+      } finally {
+        this.isLoadingManagedEmployee = false
+      }
+    },
+    closeManageEmployeeModal() {
+      if (this.isSavingManagedEmployee || this.isLoadingManagedEmployee) {
+        return
+      }
+
+      this.showManageEmployeeModal = false
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.managedEmployeeOriginal = null
+      this.manageEmployeeForm = getDefaultManageEmployeeForm()
     },
     openCreateRoleModal() {
       this.createRoleError = ''
@@ -1084,6 +1246,23 @@ export default {
         is_active: this.createVenueForm.is_active
       }
     },
+    buildManageEmployeePayload() {
+      const payload = {
+        username: this.manageEmployeeForm.username.trim(),
+        email: this.manageEmployeeForm.email.trim(),
+        first_name: this.manageEmployeeForm.first_name.trim(),
+        last_name: this.manageEmployeeForm.last_name.trim(),
+        phone: this.manageEmployeeForm.phone.trim()
+      }
+
+      if (this.manageEmployeeForm.venue !== '' && this.manageEmployeeForm.venue !== null && this.manageEmployeeForm.venue !== undefined) {
+        payload.venue = Number(this.manageEmployeeForm.venue)
+      } else {
+        payload.venue = null
+      }
+
+      return payload
+    },
     extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
       const status = Number(error?.response?.status)
@@ -1237,6 +1416,42 @@ export default {
         this.createVenueError = this.extractErrorMessage(error, 'Не удалось создать заведение')
       } finally {
         this.isCreatingVenue = false
+      }
+    },
+    async submitManageEmployee() {
+      if (!this.manageEmployeeForm.id || this.currentUserRole !== 'admin') {
+        return
+      }
+
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.isSavingManagedEmployee = true
+
+      try {
+        await api.patch(`/users/${this.manageEmployeeForm.id}/`, this.buildManageEmployeePayload())
+
+        if (normalizeRole(this.manageEmployeeForm.role) !== normalizeRole(this.managedEmployeeOriginal?.role)) {
+          await api.patch(`/users/${this.manageEmployeeForm.id}/role`, {
+            role: this.manageEmployeeForm.role
+          })
+        }
+
+        if (Number(this.manageEmployeeForm.id) === Number(this.user?.id)) {
+          const freshUser = await fetchCurrentUser()
+          this.user = freshUser
+          localStorage.setItem('user', JSON.stringify(freshUser))
+        }
+
+        await this.loadEmployees()
+        this.manageEmployeeSuccess = 'Данные сотрудника обновлены'
+        this.managedEmployeeOriginal = {
+          ...this.manageEmployeeForm,
+          role: normalizeRole(this.manageEmployeeForm.role)
+        }
+      } catch (error) {
+        this.manageEmployeeError = this.extractErrorMessage(error, 'Не удалось обновить сотрудника')
+      } finally {
+        this.isSavingManagedEmployee = false
       }
     }
   }
