@@ -76,6 +76,13 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['is_quarter_start'] = df_agg['datetime'].dt.is_quarter_start.astype(int)
     df_agg['is_quarter_end'] = df_agg['datetime'].dt.is_quarter_end.astype(int)
     
+    # СЕЗОННОСТЬ: Sin/Cos encoding для плавных циклов
+    df_agg['day_of_year'] = df_agg['datetime'].dt.dayofyear
+    df_agg['day_of_year_sin'] = np.sin(2 * np.pi * df_agg['day_of_year'] / 365)
+    df_agg['day_of_year_cos'] = np.cos(2 * np.pi * df_agg['day_of_year'] / 365)
+    df_agg['month_sin'] = np.sin(2 * np.pi * df_agg['month'] / 12)
+    df_agg['month_cos'] = np.cos(2 * np.pi * df_agg['month'] / 12)
+    
     # Праздники России
     df_agg['is_holiday'] = df_agg['datetime'].dt.date.apply(
         lambda x: 1 if x in ru_holidays else 0
@@ -90,11 +97,41 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['is_november_holiday'] = ((df_agg['month'] == 11) & (df_agg['day_of_month'] >= 3) & (df_agg['day_of_month'] <= 5)).astype(int)
     df_agg['is_december_holidays'] = ((df_agg['month'] == 12) & (df_agg['day_of_month'] >= 30)).astype(int)
     
-    # Сезонность
+    # Сезонность (one-hot)
     df_agg['is_winter'] = df_agg['month'].isin([12, 1, 2]).astype(int)
     df_agg['is_spring'] = df_agg['month'].isin([3, 4, 5]).astype(int)
     df_agg['is_summer'] = df_agg['month'].isin([6, 7, 8]).astype(int)
     df_agg['is_autumn'] = df_agg['month'].isin([9, 10, 11]).astype(int)
+    
+    # Туристический сезон для Владивостока (май-сентябрь)
+    df_agg['is_tourist_season'] = df_agg['month'].isin([5, 6, 7, 8, 9]).astype(int)
+    
+    # Инициализация сезонных статистик (ОБЯЗАТЕЛЬНО для всех строк)
+    overall_mean = df_agg['orders_count'].mean() if 'orders_count' in df_agg.columns else 0
+    overall_std = df_agg['orders_count'].std() if 'orders_count' in df_agg.columns else 1
+    
+    df_agg['month_mean_orders'] = overall_mean
+    df_agg['month_std_orders'] = overall_std if overall_std > 0 else 1.0
+    df_agg['seasonal_multiplier'] = 1.0
+    df_agg['deviation_from_seasonal_mean'] = 0.0
+    
+    # Рассчитываем сезонные статистики ТОЛЬКО если есть исторические данные
+    if 'orders_count' in df_agg.columns and len(df_agg) > 0:
+        # Исторические данные: где orders_count > 0 (не будущие прогнозы)
+        hist_mask = df_agg['orders_count'] > 0
+        
+        if hist_mask.any():
+            # Используем map() вместо merge() — нет конфликтов имён
+            month_stats = df_agg.loc[hist_mask].groupby('month')['orders_count'].agg(['mean', 'std'])
+            
+            # Заполняем через map — безопасно, без конфликтов
+            df_agg['month_mean_orders'] = df_agg['month'].map(month_stats['mean']).fillna(overall_mean)
+            df_agg['month_std_orders'] = df_agg['month'].map(month_stats['std']).fillna(overall_std if overall_std > 0 else 1.0)
+            
+            # Сезонный мультипликатор
+            df_agg['seasonal_multiplier'] = df_agg['month_mean_orders'] / overall_mean
+            df_agg['seasonal_multiplier'] = df_agg['seasonal_multiplier'].fillna(1.0)
+            
     
     # Взаимодействия времени и календаря
     df_agg['hour_weekend'] = df_agg['hour_encoded'] * df_agg['is_weekend']
@@ -102,12 +139,22 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['peak_weekend'] = df_agg['is_peak_hour'] * df_agg['is_weekend']
     df_agg['peak_holiday'] = df_agg['is_peak_hour'] * df_agg['is_holiday']
     
+    # Взаимодействия с летом/туристическим сезоном
+    df_agg['hour_summer'] = df_agg['hour_encoded'] * df_agg['is_summer']
+    df_agg['peak_summer'] = df_agg['is_peak_hour'] * df_agg['is_summer']
+    df_agg['weekend_summer'] = df_agg['is_weekend'] * df_agg['is_summer']
+    df_agg['peak_tourist_season'] = df_agg['is_peak_hour'] * df_agg['is_tourist_season']
+    
     # Конкретные дни × ужин
     df_agg['friday_dinner'] = ((df_agg['day_of_week'] == 4) & df_agg['is_dinner_peak']).astype(int)
     df_agg['saturday_dinner'] = ((df_agg['day_of_week'] == 5) & df_agg['is_dinner_peak']).astype(int)
     df_agg['sunday_dinner'] = ((df_agg['day_of_week'] == 6) & df_agg['is_dinner_peak']).astype(int)
     df_agg['saturday_lunch'] = ((df_agg['day_of_week'] == 5) & df_agg['is_lunch_peak']).astype(int)
     df_agg['sunday_lunch'] = ((df_agg['day_of_week'] == 6) & df_agg['is_lunch_peak']).astype(int)
+    
+    # Летние выходные (пик для Владивостока)
+    df_agg['summer_weekend'] = (df_agg['is_summer'] & df_agg['is_weekend']).astype(int)
+    df_agg['summer_weekend_dinner'] = (df_agg['summer_weekend'] & df_agg['is_dinner_peak']).astype(int)
     
     # Лаговые признаки (расширенные)
     df_agg['lag_orders_1h'] = df_agg['orders_count'].shift(1)
@@ -139,13 +186,8 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
     df_agg['rolling_max_168h'] = df_agg['orders_count'].rolling(168, min_periods=1).max()
     df_agg['rolling_max_720h'] = df_agg['orders_count'].rolling(720, min_periods=1).max()
     
-    # Отклонение от среднего
-    df_agg['deviation_from_mean_24h'] = df_agg['orders_count'] - df_agg['rolling_mean_24h']
-    df_agg['deviation_from_mean_168h'] = df_agg['orders_count'] - df_agg['rolling_mean_168h']
-    
-    # Процентильные признаки
-    df_agg['is_high_demand'] = (df_agg['orders_count'] > df_agg['orders_count'].quantile(0.75)).astype(int)
-    df_agg['is_very_high_demand'] = (df_agg['orders_count'] > df_agg['orders_count'].quantile(0.90)).astype(int)
+    df_agg['lag_deviation_24h'] = df_agg['lag_orders_24h'] - df_agg['rolling_mean_24h'].shift(24)
+    df_agg['lag_deviation_168h'] = df_agg['lag_orders_168h'] - df_agg['rolling_mean_168h'].shift(168)
     
     # Тренд
     df_agg['trend'] = np.arange(len(df_agg))
@@ -172,6 +214,19 @@ def _generate_features(df_agg: pd.DataFrame) -> pd.DataFrame:
         df_agg['extreme_peak'] = 0
         df_agg['cold_weekend'] = 0
         df_agg['warm_weekend'] = 0
+    
+    # Гарантируем наличие всех сезонных колонок (защита от KeyError)
+    required_seasonal_cols = [
+        'month_mean_orders', 'month_std_orders', 'seasonal_multiplier', 
+        'deviation_from_seasonal_mean', 'is_tourist_season',
+        'hour_summer', 'peak_summer', 'weekend_summer', 
+        'peak_tourist_season', 'summer_weekend', 'summer_weekend_dinner',
+        'day_of_year', 'day_of_year_sin', 'day_of_year_cos',
+        'month_sin', 'month_cos'
+    ]
+    for col in required_seasonal_cols:
+        if col not in df_agg.columns:
+            df_agg[col] = 0.0 if any(x in col for x in ['mean', 'std', 'multiplier', 'sin', 'cos']) else 0
     
     df_agg = df_agg.fillna(0)
     
@@ -232,6 +287,17 @@ def prepare_for_prediction(
     ].dt.hour.map(hour_medians_guests).clip(upper=max_allowed_guests)
     
     df_combined = _generate_features(df_combined)
+    future_mask = df_combined['datetime'] >= from_datetime
+    if future_mask.any() and 'seasonal_multiplier' in df_combined.columns:
+        # Явные множители для месяцев без истории
+        explicit_factors = {
+            5: 1.4, 6: 1.8, 7: 2.0, 8: 1.9, 9: 1.5  # Туристический сезон
+        }
+        for month, factor in explicit_factors.items():
+            mask = (future_mask & 
+                    (df_combined['month'] == month) & 
+                    (df_combined['seasonal_multiplier'] == 1.0))
+            df_combined.loc[mask, 'seasonal_multiplier'] = factor
     
     global_median = hist_df['orders_count'].median()
     lag_cols = ['lag_orders_1h', 'lag_orders_2h', 'lag_orders_3h', 'lag_orders_24h', 

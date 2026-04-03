@@ -118,6 +118,13 @@ def predict(
         df_pred.loc[peak_mask & weekend_mask, 'guests_with_buffer'] * 1.20
     ).astype(int)
     
+    df_pred = _apply_seasonal_adjustment(df_pred, verbose=verbose)
+    
+    if verbose:
+        print(f"\nОТЛАДКА: ПРЯМО ПОСЛЕ СЕЗОННОЙ КОРРЕКТИРОВКИ")
+        print(f"   orders_with_buffer.sum() = {df_pred['orders_with_buffer'].sum():,}")
+        print(f"   guests_with_buffer.sum() = {df_pred['guests_with_buffer'].sum():,}")
+    
     night_hours_mask = (df_pred['hour'] < WORKING_HOUR_START) | (df_pred['hour'] >= WORKING_HOUR_END)
     
     df_pred.loc[night_hours_mask, 'orders_predicted'] = 0
@@ -152,6 +159,48 @@ def predict(
                     'guests_predicted', 'guests_with_buffer',
                     'lag_orders_1h', 'lag_orders_24h', 'rolling_mean_24h']]
 
+
+def _apply_seasonal_adjustment(forecast_df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
+    """
+    Применяет сезонные множители для месяцев без истории.
+    """
+    df = forecast_df.copy()
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df['month'] = df['datetime'].dt.month
+    
+    # Сезонные множители для Владивостока (туристический поток)
+    seasonal_factors = {
+        1: 0.6,   # Январь: -40%
+        2: 0.7,   # Февраль
+        3: 0.9,   # Март
+        4: 1.1,   # Апрель
+        5: 1.4,   # Май: +40% (начало сезона)
+        6: 1.8,   # Июнь: +80% (высокий сезон)
+        7: 2.0,   # Июль: +100% (пик)
+        8: 1.9,   # Август
+        9: 1.5,   # Сентябрь
+        10: 1.2,  # Октябрь
+        11: 0.9,  # Ноябрь
+        12: 0.7,  # Декабрь
+    }
+    
+    # Применить множитель
+    df['seasonal_factor'] = df['month'].map(seasonal_factors)
+    df['orders_with_buffer_seasonal'] = df['orders_with_buffer'] * df['seasonal_factor']
+    df['guests_with_buffer_seasonal'] = df['guests_with_buffer'] * df['seasonal_factor']
+    df['orders_with_buffer'] = (df['orders_with_buffer'] * df['seasonal_factor']).astype(int)
+    df['guests_with_buffer'] = (df['guests_with_buffer'] * df['seasonal_factor']).astype(int)
+    df['orders_predicted'] = (df['orders_predicted'] * df['seasonal_factor']).astype(int)
+    df['guests_predicted'] = (df['guests_predicted'] * df['seasonal_factor']).astype(int)
+    
+    if verbose:
+        print(f"\nСезонная корректировка применена:")
+        for month in sorted(df['month'].unique()):
+            factor = seasonal_factors.get(month, 1.0)
+            month_data = df[df['month'] == month]
+            print(f"   {month:02d}: множитель {factor}x, заказов: {month_data['orders_with_buffer_seasonal'].sum():.0f}")
+    
+    return df
 
 def _add_weather_to_forecast(
     df_pred: pd.DataFrame,
