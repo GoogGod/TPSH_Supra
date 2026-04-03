@@ -25,26 +25,25 @@
             <p>{{ t.events }}</p>
             <h3>{{ t.notifications }}</h3>
           </div>
-          <button
-            v-if="unreadCount > 0"
-            class="notification-head-action"
-            type="button"
-            :disabled="isMarkingAll || isDeletingAll"
-            @click="handleMarkAllRead"
-          >
-            {{ isMarkingAll ? t.reading : t.readAll }}
-          </button>
-        </div>
-
-        <div v-if="notifications.length > 0" class="notification-toolbar">
-          <button
-            class="notification-toolbar-action danger"
-            type="button"
-            :disabled="isDeletingAll || isMarkingAll"
-            @click="handleDeleteAll"
-          >
-            {{ isDeletingAll ? t.deleting : t.deleteAll }}
-          </button>
+          <div class="notification-head-actions">
+            <button
+              v-if="notifications.length > 0"
+              class="notification-head-action"
+              type="button"
+              @click="handleClearLocal"
+            >
+              {{ t.clear }}
+            </button>
+            <button
+              v-if="unreadCount > 0"
+              class="notification-head-action"
+              type="button"
+              :disabled="isMarkingAll"
+              @click="handleMarkAllRead"
+            >
+              {{ isMarkingAll ? t.reading : t.readAll }}
+            </button>
+          </div>
         </div>
 
         <div v-if="error" class="notification-state is-error">
@@ -77,8 +76,9 @@
             </div>
 
             <div class="notification-actions">
-              <template v-if="needsDecision(notification)">
+              <template v-if="canConfirm(notification) || canReject(notification)">
                 <button
+                  v-if="canConfirm(notification)"
                   class="notification-action primary"
                   type="button"
                   :disabled="actionLoadingId === notification.id"
@@ -87,6 +87,7 @@
                   {{ t.confirm }}
                 </button>
                 <button
+                  v-if="canReject(notification)"
                   class="notification-action"
                   type="button"
                   :disabled="actionLoadingId === notification.id"
@@ -115,11 +116,12 @@
 <script>
 import {
   confirmNotification,
-  deleteAllNotifications,
   fetchNotifications,
   fetchUnreadNotificationsCount,
   markAllNotificationsAsRead,
   markNotificationAsRead,
+  notificationCanConfirm,
+  notificationCanReject,
   notificationNeedsDecision,
   rejectNotification
 } from '../services/notifications'
@@ -130,10 +132,9 @@ const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   events: '\u0421\u043e\u0431\u044b\u0442\u0438\u044f',
   notifications: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
+  clear: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c',
   reading: '\u0427\u0438\u0442\u0430\u0435\u043c...',
   readAll: '\u041f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0432\u0441\u0435',
-  deleting: '\u0423\u0434\u0430\u043b\u044f\u0435\u043c...',
-  deleteAll: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435',
   loading: '\u0417\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u043c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f...',
   empty: '\u041d\u043e\u0432\u044b\u0445 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442.',
   confirm: '\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c',
@@ -142,7 +143,6 @@ const TEXT = {
   loadError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   readError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043c\u0435\u0442\u0438\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435 \u043a\u0430\u043a \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u043e\u0435',
   readAllError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0432\u0441\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  deleteAllError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   confirmError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0437\u0430\u043a\u0440\u0435\u043f\u043b\u0435\u043d\u0438\u0435',
   rejectError: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c \u0437\u0430\u043a\u0440\u0435\u043f\u043b\u0435\u043d\u0438\u0435'
 }
@@ -156,11 +156,11 @@ export default {
       isOpen: false,
       isLoading: false,
       isMarkingAll: false,
-      isDeletingAll: false,
       actionLoadingId: null,
       error: '',
       unreadCount: 0,
-      notifications: []
+      notifications: [],
+      hiddenNotificationIds: []
     }
   },
   computed: {
@@ -191,6 +191,12 @@ export default {
     needsDecision(notification) {
       return notificationNeedsDecision(notification)
     },
+    canConfirm(notification) {
+      return notificationCanConfirm(notification)
+    },
+    canReject(notification) {
+      return notificationCanReject(notification)
+    },
     formatDate(value) {
       if (!value) return ''
 
@@ -208,6 +214,14 @@ export default {
     },
     async refreshUnreadCount() {
       try {
+        if (this.hiddenNotificationIds.length > 0) {
+          const notifications = await fetchNotifications()
+          const visible = this.applyHiddenNotifications(notifications)
+          this.notifications = this.isOpen ? visible : this.notifications
+          this.unreadCount = visible.filter((item) => !item.read).length
+          return
+        }
+
         this.unreadCount = await fetchUnreadNotificationsCount()
       } catch (error) {
         this.unreadCount = this.notifications.filter((item) => !item.read).length
@@ -224,7 +238,7 @@ export default {
       this.error = ''
 
       try {
-        this.notifications = await fetchNotifications()
+        this.notifications = this.applyHiddenNotifications(await fetchNotifications())
         this.unreadCount = this.notifications.filter((item) => !item.read).length
       } catch (error) {
         this.error = error?.message || this.t.loadError
@@ -254,6 +268,22 @@ export default {
     handleExternalRefresh() {
       this.refreshNotifications({ silent: true })
     },
+    applyHiddenNotifications(notifications) {
+      if (!this.hiddenNotificationIds.length) {
+        return notifications
+      }
+
+      const hiddenIds = new Set(this.hiddenNotificationIds)
+      return notifications.filter((item) => !hiddenIds.has(item.id))
+    },
+    handleClearLocal() {
+      this.hiddenNotificationIds = this.notifications
+        .map((notification) => notification.id)
+        .filter(Boolean)
+      this.notifications = []
+      this.unreadCount = 0
+      this.error = ''
+    },
     async handleRead(notificationId) {
       this.actionLoadingId = notificationId
       this.error = ''
@@ -280,21 +310,6 @@ export default {
         this.error = error?.message || this.t.readAllError
       } finally {
         this.isMarkingAll = false
-      }
-    },
-    async handleDeleteAll() {
-      this.isDeletingAll = true
-      this.error = ''
-
-      try {
-        await deleteAllNotifications()
-        this.notifications = []
-        this.unreadCount = 0
-        this.$emit('updated')
-      } catch (error) {
-        this.error = error?.message || this.t.deleteAllError
-      } finally {
-        this.isDeletingAll = false
       }
     },
     async handleConfirm(notificationId) {
@@ -402,33 +417,11 @@ export default {
   margin-bottom: 12px;
 }
 
-.notification-toolbar {
+.notification-head-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  margin-bottom: 12px;
-}
-
-.notification-toolbar-action {
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.notification-toolbar-action.danger {
-  border-color: rgba(255, 115, 115, 0.35);
-  background: rgba(120, 18, 18, 0.2);
-  color: #ffd2d8;
-}
-
-.notification-toolbar-action:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+  gap: 8px;
 }
 
 .notification-popover-head p {
