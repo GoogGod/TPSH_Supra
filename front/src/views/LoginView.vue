@@ -51,6 +51,11 @@ import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
 import logoSupra from '../assets/Logo_supra.png'
 import { loginUser } from '../services/auth'
+import {
+  getSystemNotificationPermission,
+  requestSystemNotificationPermission,
+  supportsSystemNotifications
+} from '../services/notifications'
 
 const router = useRouter()
 const route = useRoute()
@@ -124,6 +129,7 @@ const handleMockLogin = async () => {
   localStorage.setItem('isAuthenticated', 'true')
   localStorage.setItem('user', JSON.stringify(foundUser.user))
 
+  await requestPushPermissionAfterLogin()
   await router.push(route.query.redirect || '/cabinet')
 }
 
@@ -133,7 +139,19 @@ const handleBackendLogin = async () => {
     password: password.value
   })
 
+  await requestPushPermissionAfterLogin()
   await router.push(route.query.redirect || '/cabinet')
+}
+
+const requestPushPermissionAfterLogin = async () => {
+  if (!supportsSystemNotifications()) return
+  if (getSystemNotificationPermission() !== 'default') return
+
+  try {
+    await requestSystemNotificationPermission()
+  } catch (error) {
+    // ignore permission request issues during login
+  }
 }
 
 const handleLogin = async () => {

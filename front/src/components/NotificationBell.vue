@@ -21,20 +21,8 @@
     <transition name="notification-popover">
       <div v-if="isOpen" class="notification-popover">
         <div class="notification-popover-head">
-          <div>
-            <p>{{ t.events }}</p>
-            <h3>{{ t.notifications }}</h3>
-          </div>
+          <h3>{{ t.notifications }}</h3>
           <div class="notification-head-actions">
-            <button
-              v-if="canTogglePush"
-              class="notification-head-action"
-              type="button"
-              :disabled="isRequestingPushPermission"
-              @click="handleTogglePush"
-            >
-              {{ pushButtonLabel }}
-            </button>
             <button
               v-if="notifications.length > 0"
               class="notification-head-action"
@@ -57,9 +45,6 @@
 
         <div v-if="error" class="notification-state is-error">
           {{ error }}
-        </div>
-        <div v-if="!error && pushStateLabel" class="notification-state">
-          {{ pushStateLabel }}
         </div>
         <div v-if="!error && isLoading && notifications.length === 0" class="notification-state">
           {{ t.loading }}
@@ -135,9 +120,7 @@ import {
   markNotificationAsRead,
   notificationCanConfirm,
   notificationCanReject,
-  notificationNeedsDecision,
   rejectNotification,
-  requestSystemNotificationPermission,
   showSystemNotification,
   supportsSystemNotifications
 } from '../services/notifications'
@@ -145,7 +128,6 @@ import {
 const POLL_INTERVAL_MS = 15000
 const HIDDEN_NOTIFICATIONS_STORAGE_KEY = 'hidden_notification_ids'
 const SHOWN_SYSTEM_NOTIFICATION_IDS_KEY = 'shown_system_notification_ids'
-const PUSH_ENABLED_STORAGE_KEY = 'push_notifications_enabled'
 
 const readHiddenNotificationIds = () => {
   try {
@@ -165,22 +147,16 @@ const readShownSystemNotificationIds = () => {
   }
 }
 
-const readPushEnabled = () => {
-  try {
-    return localStorage.getItem(PUSH_ENABLED_STORAGE_KEY) === 'true'
-  } catch (error) {
-    return false
-  }
-}
+const sortNotifications = (items = []) =>
+  items.slice().sort((left, right) => {
+    const leftTime = left?.created_at ? new Date(left.created_at).getTime() : 0
+    const rightTime = right?.created_at ? new Date(right.created_at).getTime() : 0
+    return rightTime - leftTime
+  })
 
 const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  events: '\u0421\u043e\u0431\u044b\u0442\u0438\u044f',
   notifications: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  enablePush: '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c push',
-  disablePush: '\u0412\u044b\u043a\u043b\u044e\u0447\u0438\u0442\u044c push \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  enablingPush: '\u0412\u043a\u043b\u044e\u0447\u0430\u0435\u043c...',
-  pushBlocked: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b',
   clear: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c',
   reading: '\u0427\u0438\u0442\u0430\u0435\u043c...',
   readAll: '\u041f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0432\u0441\u0435',
@@ -205,31 +181,17 @@ export default {
       isOpen: false,
       isLoading: false,
       isMarkingAll: false,
-      isRequestingPushPermission: false,
       actionLoadingId: null,
       error: '',
       unreadCount: 0,
       notifications: [],
       hiddenNotificationIds: readHiddenNotificationIds(),
-      shownSystemNotificationIds: readShownSystemNotificationIds(),
-      systemNotificationPermission: getSystemNotificationPermission(),
-      pushEnabled: readPushEnabled()
+      shownSystemNotificationIds: readShownSystemNotificationIds()
     }
   },
   computed: {
     badgeLabel() {
       return this.unreadCount > 99 ? '99+' : String(this.unreadCount)
-    },
-    canTogglePush() {
-      return supportsSystemNotifications() && this.systemNotificationPermission !== 'denied'
-    },
-    pushButtonLabel() {
-      if (this.isRequestingPushPermission) return this.t.enablingPush
-      return this.pushEnabled ? this.t.disablePush : this.t.enablePush
-    },
-    pushStateLabel() {
-      if (this.systemNotificationPermission === 'denied') return this.t.pushBlocked
-      return ''
     }
   },
   async mounted() {
@@ -252,8 +214,8 @@ export default {
     }
   },
   methods: {
-    needsDecision(notification) {
-      return notificationNeedsDecision(notification)
+    shouldShowSystemNotifications() {
+      return supportsSystemNotifications() && getSystemNotificationPermission() === 'granted'
     },
     canConfirm(notification) {
       return notificationCanConfirm(notification)
@@ -292,12 +254,67 @@ export default {
       ])).slice(-200)
       this.persistShownSystemNotificationIds()
     },
+    persistHiddenNotificationIds() {
+      try {
+        const normalized = this.hiddenNotificationIds.slice(-500)
+        localStorage.setItem(HIDDEN_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(normalized))
+      } catch (error) {
+        // ignore storage write issues
+      }
+    },
+    applyHiddenNotifications(notifications) {
+      if (!this.hiddenNotificationIds.length) {
+        return notifications
+      }
+
+      const hiddenIds = new Set(this.hiddenNotificationIds)
+      return notifications.filter((item) => !hiddenIds.has(item.id))
+    },
+    mergeNotifications(fetchedNotifications) {
+      const nextMap = new Map()
+
+      for (const notification of this.notifications) {
+        if (notification?.id) {
+          nextMap.set(notification.id, notification)
+        }
+      }
+
+      for (const notification of fetchedNotifications) {
+        if (!notification?.id) continue
+        nextMap.set(notification.id, {
+          ...(nextMap.get(notification.id) || {}),
+          ...notification
+        })
+      }
+
+      return sortNotifications(Array.from(nextMap.values()))
+    },
+    syncNotificationState(notificationId, updates = {}) {
+      if (!notificationId) return
+
+      this.notifications = this.notifications.map((notification) =>
+        notification.id === notificationId
+          ? {
+              ...notification,
+              ...updates
+            }
+          : notification
+      )
+      this.unreadCount = this.notifications.filter((item) => !item.read).length
+    },
+    markAllNotificationsLocally(updates = {}) {
+      this.notifications = this.notifications.map((notification) => ({
+        ...notification,
+        read: true,
+        ...updates
+      }))
+      this.unreadCount = 0
+    },
     async bootstrapNotifications() {
       try {
-        const notifications = this.applyHiddenNotifications(await fetchNotifications())
-        this.notifications = this.isOpen ? notifications : this.notifications
+        const notifications = this.mergeNotifications(this.applyHiddenNotifications(await fetchNotifications()))
+        this.notifications = notifications
         this.unreadCount = notifications.filter((item) => !item.read).length
-        this.markSystemNotificationsAsSeen(notifications)
       } catch (error) {
         await this.refreshUnreadCount()
       }
@@ -307,25 +324,28 @@ export default {
       this.error = ''
 
       try {
-        const notifications = this.applyHiddenNotifications(await fetchNotifications())
-        this.notifications = this.isOpen ? notifications : this.notifications
+        const notifications = this.mergeNotifications(this.applyHiddenNotifications(await fetchNotifications()))
+        this.notifications = notifications
         this.unreadCount = notifications.filter((item) => !item.read).length
 
-        if (showSystem && this.pushEnabled && this.systemNotificationPermission === 'granted') {
-          const hiddenIds = new Set(this.hiddenNotificationIds)
+        if (showSystem && this.shouldShowSystemNotifications()) {
           const shownIds = new Set(this.shownSystemNotificationIds)
-          const freshNotifications = notifications.filter((item) => !item.read && item.id && !hiddenIds.has(item.id) && !shownIds.has(item.id))
+          const freshNotifications = notifications.filter((item) => !item.read && item.id && !shownIds.has(item.id))
+          const deliveredNotifications = []
 
           for (const notification of freshNotifications) {
             try {
               await showSystemNotification(notification)
+              deliveredNotifications.push(notification)
             } catch (error) {
               // ignore notification delivery issues
             }
           }
-        }
 
-        this.markSystemNotificationsAsSeen(notifications)
+          if (deliveredNotifications.length > 0) {
+            this.markSystemNotificationsAsSeen(deliveredNotifications)
+          }
+        }
       } catch (error) {
         this.error = error?.message || this.t.loadError
       } finally {
@@ -335,10 +355,7 @@ export default {
     async refreshUnreadCount() {
       try {
         if (this.hiddenNotificationIds.length > 0) {
-          const notifications = await fetchNotifications()
-          const visible = this.applyHiddenNotifications(notifications)
-          this.notifications = this.isOpen ? visible : this.notifications
-          this.unreadCount = visible.filter((item) => !item.read).length
+          this.unreadCount = this.notifications.filter((item) => !item.read).length
           return
         }
 
@@ -359,34 +376,6 @@ export default {
         await this.refreshNotifications()
       }
     },
-    async handleTogglePush() {
-      if (!this.canTogglePush || this.isRequestingPushPermission) return
-      this.isRequestingPushPermission = true
-      this.error = ''
-
-      try {
-        if (!this.pushEnabled) {
-          this.systemNotificationPermission = await requestSystemNotificationPermission()
-          if (this.systemNotificationPermission === 'granted') {
-            this.pushEnabled = true
-            localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'true')
-            await this.syncNotifications({ silent: true, showSystem: false })
-          }
-        } else {
-          this.pushEnabled = false
-          localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'false')
-          const registration = await navigator.serviceWorker.ready
-          const subscription = await registration.pushManager.getSubscription()
-          if (subscription) {
-            await subscription.unsubscribe().catch(() => undefined)
-          }
-        }
-      } catch (error) {
-        this.error = error?.message || this.t.loadError
-      } finally {
-        this.isRequestingPushPermission = false
-      }
-    },
     handleOutsideClick(event) {
       if (!this.isOpen) return
       if (this.$refs.root?.contains(event.target)) return
@@ -403,29 +392,15 @@ export default {
     handleExternalRefresh() {
       this.refreshNotifications({ silent: true })
     },
-    applyHiddenNotifications(notifications) {
-      const unreadOnly = notifications.filter((item) => !item.read)
-
-      if (!this.hiddenNotificationIds.length) {
-        return unreadOnly
-      }
-
-      const hiddenIds = new Set(this.hiddenNotificationIds)
-      return unreadOnly.filter((item) => !hiddenIds.has(item.id))
-    },
-    persistHiddenNotificationIds() {
-      try {
-        localStorage.setItem(HIDDEN_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(this.hiddenNotificationIds))
-      } catch (error) {
-        // ignore storage write issues
-      }
-    },
     handleClearLocal() {
+      const hiddenIds = this.notifications.map((notification) => notification.id).filter(Boolean)
+
       this.hiddenNotificationIds = Array.from(new Set([
         ...this.hiddenNotificationIds,
-        ...this.notifications.map((notification) => notification.id).filter(Boolean)
-      ]))
+        ...hiddenIds
+      ])).slice(-500)
       this.persistHiddenNotificationIds()
+      this.markSystemNotificationsAsSeen(this.notifications)
       this.notifications = []
       this.unreadCount = 0
       this.error = ''
@@ -436,7 +411,7 @@ export default {
 
       try {
         await markNotificationAsRead(notificationId)
-        await this.loadNotifications({ silent: true })
+        this.syncNotificationState(notificationId, { read: true })
         this.$emit('updated')
       } catch (error) {
         this.error = error?.message || this.t.readError
@@ -450,7 +425,7 @@ export default {
 
       try {
         await markAllNotificationsAsRead()
-        await this.loadNotifications({ silent: true })
+        this.markAllNotificationsLocally()
         this.$emit('updated')
       } catch (error) {
         this.error = error?.message || this.t.readAllError
@@ -464,7 +439,7 @@ export default {
 
       try {
         await confirmNotification(notificationId)
-        await this.loadNotifications({ silent: true })
+        this.syncNotificationState(notificationId, { read: true })
         this.$emit('updated')
       } catch (error) {
         this.error = error?.message || this.t.confirmError
@@ -478,7 +453,7 @@ export default {
 
       try {
         await rejectNotification(notificationId)
-        await this.loadNotifications({ silent: true })
+        this.syncNotificationState(notificationId, { read: true })
         this.$emit('updated')
       } catch (error) {
         this.error = error?.message || this.t.rejectError
@@ -557,7 +532,7 @@ export default {
 
 .notification-popover-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
@@ -568,14 +543,6 @@ export default {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.notification-popover-head p {
-  margin: 0 0 4px;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .notification-popover-head h3 {
