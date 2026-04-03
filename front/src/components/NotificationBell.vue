@@ -127,6 +127,16 @@ import {
 } from '../services/notifications'
 
 const POLL_INTERVAL_MS = 15000
+const HIDDEN_NOTIFICATIONS_STORAGE_KEY = 'hidden_notification_ids'
+
+const readHiddenNotificationIds = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_NOTIFICATIONS_STORAGE_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter(Boolean) : []
+  } catch (error) {
+    return []
+  }
+}
 
 const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
@@ -160,7 +170,7 @@ export default {
       error: '',
       unreadCount: 0,
       notifications: [],
-      hiddenNotificationIds: []
+      hiddenNotificationIds: readHiddenNotificationIds()
     }
   },
   computed: {
@@ -269,17 +279,28 @@ export default {
       this.refreshNotifications({ silent: true })
     },
     applyHiddenNotifications(notifications) {
+      const unreadOnly = notifications.filter((item) => !item.read)
+
       if (!this.hiddenNotificationIds.length) {
-        return notifications
+        return unreadOnly
       }
 
       const hiddenIds = new Set(this.hiddenNotificationIds)
-      return notifications.filter((item) => !hiddenIds.has(item.id))
+      return unreadOnly.filter((item) => !hiddenIds.has(item.id))
+    },
+    persistHiddenNotificationIds() {
+      try {
+        localStorage.setItem(HIDDEN_NOTIFICATIONS_STORAGE_KEY, JSON.stringify(this.hiddenNotificationIds))
+      } catch (error) {
+        // ignore storage write issues
+      }
     },
     handleClearLocal() {
-      this.hiddenNotificationIds = this.notifications
-        .map((notification) => notification.id)
-        .filter(Boolean)
+      this.hiddenNotificationIds = Array.from(new Set([
+        ...this.hiddenNotificationIds,
+        ...this.notifications.map((notification) => notification.id).filter(Boolean)
+      ]))
+      this.persistHiddenNotificationIds()
       this.notifications = []
       this.unreadCount = 0
       this.error = ''
@@ -541,19 +562,23 @@ export default {
 
 .notification-popover-enter-active,
 .notification-popover-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition: opacity 0.16s ease, scale 0.16s ease;
 }
 
 .notification-popover-enter-from,
 .notification-popover-leave-to {
   opacity: 0;
-  transform: translateY(-6px);
+  scale: 0.98;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 768px), (hover: none) and (pointer: coarse) {
   .notification-popover {
-    right: -4px;
-    width: min(94vw, 360px);
+    position: fixed;
+    top: 78px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(92vw, 380px);
     padding: 12px;
   }
 }

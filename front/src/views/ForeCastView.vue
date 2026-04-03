@@ -1,5 +1,5 @@
 ﻿<template>
-  <div class="forecast-page">
+  <div class="forecast-page" :class="{ 'is-handheld': isHandheldDevice }">
     <transition name="menu-overlay">
       <div v-if="menuOpen" class="side-menu-overlay" @click="closeMenu"></div>
     </transition>
@@ -81,7 +81,19 @@
         <div class="waiter-picker-card">
           <div class="waiter-picker-head">
             <h2>Места</h2>
-            <p>{{ selectorDescription }}</p>
+            <p class="waiter-picker-description-desktop">{{ selectorDescription }}</p>
+            <button
+              v-if="useMobileSelectorInfo"
+              class="waiter-picker-info-button"
+              type="button"
+              :aria-expanded="showMobileSelectorInfo ? 'true' : 'false'"
+              @click="showMobileSelectorInfo = !showMobileSelectorInfo"
+            >
+              i
+            </button>
+          </div>
+          <div v-if="useMobileSelectorInfo && showMobileSelectorInfo" class="waiter-picker-info-mobile">
+            {{ selectorDescription }}
           </div>
           <div v-if="waiters.length === 0" class="waiter-empty-state">Нет доступных мест для отображения</div>
           <div v-else class="waiter-button-list">
@@ -99,35 +111,6 @@
             </button>
           </div>
 
-          <div v-if="selectedWaiterInfo" class="slot-actions-card">
-            <p class="slot-actions-title">{{ selectedWaiterInfo.label }}</p>
-            <p class="slot-actions-caption">{{ selectedWaiterCaption }}</p>
-            <div v-if="isWaiterView" class="slot-actions-buttons slot-actions-buttons-single">
-              <button class="claim-slot-button" :disabled="!canClaimSelectedWaiter || isClaimingSlot" @click="handleClaimSelectedWaiter">
-                {{ isClaimingSlot ? 'Закрепляем...' : 'Закрепиться' }}
-              </button>
-            </div>
-            <div v-else class="slot-actions-buttons">
-              <button class="claim-slot-button" :disabled="!canOpenAssignPanel || isAssigningSlot || isUnassigningSlot" @click="openAssignPanel">Закрепить</button>
-              <button class="unassign-slot-button" :disabled="!canUnassignSelectedWaiter || isUnassigningSlot || isAssigningSlot" @click="handleUnassignSelectedWaiter">
-                {{ isUnassigningSlot ? 'Открепляем...' : 'Открепить' }}
-              </button>
-            </div>
-            <div v-if="showAssignPanel && canManageSchedule" class="assign-panel">
-              <label class="assign-panel-field">
-                <span>Выберите сотрудника</span>
-                <ThemedSelect
-                  v-model="selectedEmployeeToAssign"
-                  :options="assignableEmployeeOptions"
-                  placeholder="Выберите сотрудника"
-                />
-              </label>
-              <div class="assign-panel-actions">
-                <button class="claim-slot-button" :disabled="!selectedEmployeeToAssign || isAssigningSlot" @click="handleAssignSelectedWaiter">{{ isAssigningSlot ? 'Закрепляем...' : 'Подтвердить' }}</button>
-                <button class="unassign-slot-button" :disabled="isAssigningSlot" @click="closeAssignPanel">Отмена</button>
-              </div>
-            </div>
-          </div>
         </div>
 
         <section v-if="canEditSelectedWaiterSchedule" class="schedule-editor-card">
@@ -220,6 +203,36 @@
         <div v-if="canPublishCurrentSchedule" class="bottom-actions bottom-actions-single">
           <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
         </div>
+
+        <div v-if="selectedWaiterInfo" class="slot-actions-card slot-actions-card-bottom">
+          <p class="slot-actions-title">{{ selectedWaiterInfo.label }}</p>
+          <p class="slot-actions-caption">{{ selectedWaiterCaption }}</p>
+          <div v-if="isWaiterView" class="slot-actions-buttons slot-actions-buttons-single">
+            <button class="claim-slot-button" :disabled="!canClaimSelectedWaiter || isClaimingSlot" @click="handleClaimSelectedWaiter">
+              {{ isClaimingSlot ? 'Закрепляем...' : 'Закрепиться' }}
+            </button>
+          </div>
+          <div v-else class="slot-actions-buttons">
+            <button class="claim-slot-button" :disabled="!canOpenAssignPanel || isAssigningSlot || isUnassigningSlot" @click="openAssignPanel">Закрепить</button>
+            <button class="unassign-slot-button" :disabled="!canUnassignSelectedWaiter || isUnassigningSlot || isAssigningSlot" @click="handleUnassignSelectedWaiter">
+              {{ isUnassigningSlot ? 'Открепляем...' : 'Открепить' }}
+            </button>
+          </div>
+          <div v-if="showAssignPanel && canManageSchedule" class="assign-panel">
+            <label class="assign-panel-field">
+              <span>Выберите сотрудника</span>
+              <ThemedSelect
+                v-model="selectedEmployeeToAssign"
+                :options="assignableEmployeeOptions"
+                placeholder="Выберите сотрудника"
+              />
+            </label>
+            <div class="assign-panel-actions">
+              <button class="claim-slot-button" :disabled="!selectedEmployeeToAssign || isAssigningSlot" @click="handleAssignSelectedWaiter">{{ isAssigningSlot ? 'Закрепляем...' : 'Подтвердить' }}</button>
+              <button class="unassign-slot-button" :disabled="isAssigningSlot" @click="closeAssignPanel">Отмена</button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>
@@ -240,6 +253,17 @@ const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
 const asArray = (payload) => Array.isArray(payload) ? payload : Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.data) ? payload.data : []
 const getVenueId = (entity) => { const raw = entity?.venue_id ?? entity?.venue?.id ?? entity?.venue; return raw === undefined || raw === null || raw === '' ? null : Number(raw) }
+const detectHandheldDevice = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
+  const uaDataMobile = navigator.userAgentData?.mobile === true
+  const ua = String(navigator.userAgent || '').toLowerCase()
+  const mobileUa = /android|iphone|ipod|blackberry|iemobile|opera mini|mobile/.test(ua)
+  const coarsePointer =
+    window.matchMedia?.('(pointer: coarse)')?.matches ||
+    window.matchMedia?.('(any-pointer: coarse)')?.matches ||
+    navigator.maxTouchPoints > 0
+  return Boolean(uaDataMobile || mobileUa || coarsePointer)
+}
 const formatTimeForApi = (value) => { const normalized = String(value || '').trim(); return normalized && normalized.length === 5 ? `${normalized}:00` : normalized }
 const getHoursDifference = (start, end) => {
   if (!start || !end) return null
@@ -273,6 +297,8 @@ export default {
       selectedWaiter: '',
       selectedEmployeeToAssign: '',
       showAssignPanel: false,
+      showMobileSelectorInfo: false,
+      isHandheldDevice: detectHandheldDevice(),
       weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
       scheduleRaw: [],
       scheduleExists: false,
@@ -296,6 +322,7 @@ export default {
     currentUserRole() { return normalizeRole(this.user.role) },
     currentVenueId() { return getVenueId(this.user) },
     canManageSchedule() { return ['manager', 'admin'].includes(this.currentUserRole) },
+    useMobileSelectorInfo() { return this.isHandheldDevice },
     isWaiterView() { return !this.canManageSchedule },
     hasSchedule() { return this.scheduleExists },
     isDraftSchedule() { return this.currentScheduleStatus === 'draft' },
@@ -443,6 +470,9 @@ export default {
     selectedWaiter() { this.syncEditableEntries() }
   },
   async mounted() {
+    this.updateDeviceMode()
+    window.addEventListener('resize', this.updateDeviceMode)
+    window.addEventListener('orientationchange', this.updateDeviceMode)
     if (!USE_MOCK_AUTH) {
       try {
         const freshUser = await fetchCurrentUser()
@@ -458,7 +488,15 @@ export default {
     if (this.canManageSchedule) await this.loadEmployees()
     await this.loadSchedule()
   },
+  beforeUnmount() {
+    window.removeEventListener('resize', this.updateDeviceMode)
+    window.removeEventListener('orientationchange', this.updateDeviceMode)
+  },
   methods: {
+    updateDeviceMode() {
+      this.isHandheldDevice = detectHandheldDevice()
+      if (!this.isHandheldDevice) this.showMobileSelectorInfo = false
+    },
     async loadEmployees() {
       if (USE_MOCK_AUTH) return
       try { const response = await api.get('/users/'); this.employees = asArray(response.data) } catch (error) { this.employees = [] }
