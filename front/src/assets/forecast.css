@@ -146,6 +146,11 @@
   margin-bottom: 14px;
 }
 
+.schedule-info-row-bottom {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
 .schedule-status-card {
   padding: 14px 16px;
   border-radius: 18px;
@@ -383,6 +388,7 @@
 
 .waiter-button {
   min-width: 128px;
+  max-width: 188px;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -402,8 +408,13 @@
   cursor: not-allowed;
 }
 
+.waiter-button.claimed {
+  opacity: 0.6;
+}
+
 .waiter-button.active {
   background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
 }
 
 .waiter-button-dot {
@@ -416,6 +427,9 @@
 .waiter-button-name {
   font-size: 15px;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -423,6 +437,10 @@
   font-size: 12px;
   color: rgba(255, 255, 255, 0.72);
   grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .calendar-card {
@@ -1032,6 +1050,17 @@
   margin-top: 16px;
 }
 
+.day-editor-state-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .schedule-editor-entry-modal {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.05)),
@@ -1132,6 +1161,10 @@
   .schedule-editor-head,
   .schedule-editor-entry-top {
     display: grid;
+  }
+
+  .day-editor-state-button {
+    width: 100%;
   }
 
   .schedule-editor-grid,

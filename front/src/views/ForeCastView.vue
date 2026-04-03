@@ -50,7 +50,6 @@
           <div v-else-if="isLoadingSchedule" class="schedule-status-card">Загружаем расписание...</div>
           <div v-else-if="scheduleError" class="schedule-status-card is-error">{{ scheduleError }}</div>
           <div v-else-if="!hasSchedule" class="schedule-status-card">На этот месяц расписание пока не создано</div>
-          <div v-else class="schedule-status-card is-soft">{{ roleHint }}</div>
         </div>
 
         <div class="waiter-picker-card">
@@ -76,7 +75,7 @@
               v-for="waiter in waiters"
               :key="waiter.slot_position_key"
               class="waiter-button"
-              :class="{ active: waiter.slot_position_key === selectedWaiter, disabled: !canSelectWaiter(waiter) }"
+              :class="{ active: waiter.slot_position_key === selectedWaiter, disabled: !canSelectWaiter(waiter), claimed: waiter.isClaimed }"
               :style="getWaiterButtonStyle(waiter)"
               :disabled="!canSelectWaiter(waiter)"
               @click="selectWaiter(waiter.slot_position_key)"
@@ -121,7 +120,10 @@
           </div>
         </div>
 
-        <div v-if="canToggleScheduleStatus" class="bottom-actions bottom-actions-single">
+        <div v-if="canToggleScheduleStatus || canAddScheduleSlot" class="bottom-actions" :class="{ 'bottom-actions-single': !canAddScheduleSlot || !canToggleScheduleStatus }">
+          <button v-if="canAddScheduleSlot" class="create-schedule-button" :disabled="isAddingSlot" @click="openAddSlotModal">
+            {{ isAddingSlot ? 'Добавляем...' : 'Добавить место' }}
+          </button>
           <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handleToggleScheduleStatus">{{ scheduleToggleButtonLabel }}</button>
         </div>
 
@@ -155,23 +157,8 @@
           </div>
         </div>
 
-        <article v-if="staffShortageSummary" class="schedule-shortage-card">
-          <div class="schedule-shortage-head">
-            <span class="schedule-shortage-badge">Нехватка персонала</span>
-            <strong class="schedule-shortage-value">
-              {{ staffShortageSummary.shortage }}
-            </strong>
-          </div>
-          <p class="schedule-shortage-copy">
-            Сейчас есть: {{ staffShortageSummary.available }}. Нужно: {{ staffShortageSummary.required }}. Не хватает: {{ staffShortageSummary.shortage }}.
-          </p>
-        </article>
-
-        <div v-if="scheduleMetrics.length" class="schedule-metrics-grid">
-          <article v-for="metric in scheduleMetrics" :key="metric.key" class="schedule-metric-card">
-            <span class="schedule-metric-label">{{ metric.label }}</span>
-            <strong class="schedule-metric-value">{{ metric.value }}</strong>
-          </article>
+        <div v-if="hasSchedule && !scheduleNotice && !scheduleError && !isLoadingSchedule" class="schedule-info-row schedule-info-row-bottom">
+          <div class="schedule-status-card is-soft">{{ roleHint }}</div>
         </div>
 
         <transition name="modal-fade">
@@ -179,13 +166,11 @@
             <div class="day-editor-card">
               <div class="day-editor-head">
                 <div>
-                  <p class="schedule-editor-subtitle">Черновик</p>
-                  <h2 class="schedule-editor-title">{{ dayEditorEntry ? formatEntryDate(dayEditorEntry.date) : 'Редактирование дня' }}</h2>
+                  <p class="schedule-editor-subtitle">Редактирование</p>
+                  <h2 class="schedule-editor-title">{{ buildDayEditorTitle() }}</h2>
                 </div>
                 <button class="day-editor-close" type="button" @click="closeDayEditorModal">×</button>
               </div>
-
-              <p v-if="selectedWaiterInfo" class="schedule-editor-copy">Место {{ selectedWaiterInfo.label }}. Изменения сохраняются только для выбранного дня.</p>
 
               <div v-if="dayEditorEntry" class="schedule-editor-entry schedule-editor-entry-modal">
                 <div class="schedule-editor-entry-top">
@@ -193,14 +178,18 @@
                     <strong>{{ dayEditorEntry.is_working ? getShiftLabel(dayEditorEntry.shift_type) : 'Выходной день' }}</strong>
                     <p>{{ dayEditorEntry.work_start && dayEditorEntry.work_end ? `${dayEditorEntry.work_start} - ${dayEditorEntry.work_end}` : 'Без времени смены' }}</p>
                   </div>
+                  <button class="day-editor-state-button" type="button" @click="toggleDayEditorWorkingState">
+                    {{ dayEditorEntry.is_working ? 'Сделать выходным' : 'Вернуть смену' }}
+                  </button>
                 </div>
 
                 <div class="schedule-editor-grid">
-                  <label class="schedule-editor-field">
+                  <label class="schedule-editor-field schedule-editor-field-wide">
                     <span>Тип смены</span>
                     <ThemedSelect
                       v-model="dayEditorEntry.shift_type"
                       :options="shiftTypeOptions"
+                      :disabled="!dayEditorEntry.is_working"
                       @change="handleDayEditorShiftTypeChange"
                       placeholder="Тип смены"
                     />
@@ -225,6 +214,38 @@
             </div>
           </div>
         </transition>
+
+        <transition name="modal-fade">
+          <div v-if="showAddSlotModal" class="day-editor-overlay" @click.self="closeAddSlotModal">
+            <div class="day-editor-card add-slot-card">
+              <div class="day-editor-head">
+                <div>
+                  <p class="schedule-editor-subtitle">Новое место</p>
+                  <h2 class="schedule-editor-title">Добавить место в черновик</h2>
+                </div>
+                <button class="day-editor-close" type="button" @click="closeAddSlotModal">×</button>
+              </div>
+
+              <div class="schedule-editor-entry schedule-editor-entry-modal">
+                <label class="schedule-editor-field">
+                  <span>Категория официанта</span>
+                  <ThemedSelect
+                    v-model="selectedSlotGrade"
+                    :options="slotGradeOptions"
+                    placeholder="Выберите категорию"
+                  />
+                </label>
+              </div>
+
+              <div class="schedule-editor-actions day-editor-actions">
+                <button class="unassign-slot-button" :disabled="isAddingSlot" @click="closeAddSlotModal">Отмена</button>
+                <button class="claim-slot-button" :disabled="!selectedSlotGrade || isAddingSlot" @click="handleAddSlot">
+                  {{ isAddingSlot ? 'Добавляем...' : 'Добавить место' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
       </section>
     </main>
   </div>
@@ -236,11 +257,11 @@ import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
+import { addScheduleSlot, assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
-const SHIFT_LABELS = { morning: 'Утро', evening: 'Вечер', full: 'Полный день', off: 'Выходной', shift: 'Смена' }
+const SHIFT_LABELS = { morning: 'Утренняя смена', evening: 'Вечерняя смена', full: 'Полный день', off: 'Выходной', shift: 'Произвольная смена' }
 const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
 const asArray = (payload) => Array.isArray(payload) ? payload : Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.data) ? payload.data : []
@@ -296,19 +317,21 @@ export default {
       scheduleExists: false,
       scheduleError: '',
       scheduleNotice: '',
-      latestGenerationSummary: null,
       isLoadingSchedule: false,
       isMonthSwitching: false,
       isGeneratingSchedule: false,
       isPublishingSchedule: false,
+      isAddingSlot: false,
       isClaimingSlot: false,
       isUnassigningSlot: false,
       isAssigningSlot: false,
       isSavingDraft: false,
       employees: [],
       showDayEditorModal: false,
+      showAddSlotModal: false,
       dayEditorEntry: null,
       dayEditorOriginalEntry: null,
+      selectedSlotGrade: '',
       user: (() => { try { return JSON.parse(localStorage.getItem('user')) || { role: '' } } catch (error) { return { role: '' } } })()
     }
   },
@@ -322,6 +345,7 @@ export default {
     isDraftSchedule() { return this.currentScheduleStatus === 'draft' },
     isPublishedSchedule() { return this.currentScheduleStatus === 'published' },
     canToggleScheduleStatus() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && (this.isDraftSchedule || this.isPublishedSchedule) },
+    canAddScheduleSlot() { return this.canManageSchedule && this.isDraftSchedule && !!this.currentScheduleId },
     scheduleToggleButtonLabel() {
       if (this.isPublishingSchedule) return this.isDraftSchedule ? 'Публикуем...' : 'Переводим в черновик...'
       return this.isDraftSchedule ? 'Опубликовать' : 'Редактировать'
@@ -351,6 +375,10 @@ export default {
             claimedByCurrentUser: this.isCurrentUserAssignment(item),
             identities: [normalizeIdentity(item.employee_key), normalizeIdentity(item.employee_id), normalizeIdentity(item.waiter_num), normalizeIdentity(item.assigned_employee_id), normalizeIdentity(item.assigned_employee_username)].filter(Boolean)
           })
+        } else {
+          const current = grouped.get(slotPositionKey)
+          if (!current.grade && item.grade) current.grade = item.grade
+          if (!current.roleDisplay && item.employee_role_display) current.roleDisplay = item.employee_role_display
         }
       })
       return Array.from(grouped.values()).sort((left, right) => (left.waiter_num ?? 0) - (right.waiter_num ?? 0))
@@ -406,11 +434,16 @@ export default {
     },
     shiftTypeOptions() {
       return [
-        { value: 'morning', label: 'Утро' },
-        { value: 'evening', label: 'Вечер' },
+        { value: 'morning', label: 'Утренняя смена' },
+        { value: 'evening', label: 'Вечерняя смена' },
         { value: 'full', label: 'Полный день' },
-        { value: 'shift', label: 'Смена' },
-        { value: 'off', label: 'Выходной' }
+        { value: 'shift', label: 'Произвольная смена' }
+      ]
+    },
+    slotGradeOptions() {
+      return [
+        { value: 'employee_noob', label: 'Стажер' },
+        { value: 'employee_pro', label: 'Опытный' }
       ]
     },
     monthTitle() { return this.currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) },
@@ -431,37 +464,6 @@ export default {
     hasPendingDayEditorChanges() {
       if (!this.dayEditorEntry || !this.dayEditorOriginalEntry) return false
       return JSON.stringify(buildComparableEntryState(this.dayEditorEntry)) !== JSON.stringify(buildComparableEntryState(this.dayEditorOriginalEntry))
-    },
-    staffShortageSummary() {
-      const summary = this.latestGenerationSummary
-      if (!summary) return null
-
-      const available = Number(summary.available_staff)
-      const required = Number(summary.required_waiters_peak)
-      const explicitShortage = Number(summary.lack_staff_peak)
-
-      if (!Number.isFinite(available) || !Number.isFinite(required)) {
-        return null
-      }
-
-      const shortage = Number.isFinite(explicitShortage)
-        ? explicitShortage
-        : Math.max(required - available, 0)
-
-      return {
-        available,
-        required,
-        shortage: Math.max(shortage, 0)
-      }
-    },
-    scheduleMetrics() {
-      const summary = this.latestGenerationSummary
-      if (!summary) return []
-      return [
-        { key: 'available_staff', label: 'Сейчас есть', value: summary.available_staff ?? '—' },
-        { key: 'required_waiters_peak', label: 'Нужно', value: summary.required_waiters_peak ?? '—' },
-        { key: 'lack_staff_peak', label: 'Не хватает', value: summary.lack_staff_peak ?? '—' }
-      ].filter((item) => item.value !== undefined && item.value !== null)
     }
   },
   watch: {
@@ -504,6 +506,8 @@ export default {
     closeMenu() { this.menuOpen = false },
     goToProfile() { this.menuOpen = false; this.$router.push('/cabinet') },
     clearScheduleNotice() { this.scheduleNotice = '' },
+    openAddSlotModal() { if (!this.canAddScheduleSlot) return; this.selectedSlotGrade = ''; this.showAddSlotModal = true },
+    closeAddSlotModal() { this.selectedSlotGrade = ''; this.showAddSlotModal = false },
     openAssignPanel() { if (!this.canOpenAssignPanel) return; this.selectedEmployeeToAssign = ''; this.showAssignPanel = true },
     closeAssignPanel() { this.selectedEmployeeToAssign = ''; this.showAssignPanel = false },
     async prevMonth() { this.clearScheduleNotice(); this.currentMonth = new Date(this.currentMonth.getFullYear(), this.currentMonth.getMonth() - 1, 1); await this.loadSchedule({ isMonthSwitching: true }) },
@@ -513,6 +517,7 @@ export default {
       this.isLoadingSchedule = !isMonthSwitching
       this.isMonthSwitching = isMonthSwitching
       this.closeAssignPanel()
+      this.closeAddSlotModal()
       try {
         const schedule = await fetchScheduleForMonth({ monthDate: this.currentMonth, user: this.user, scheduleId })
         this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []
@@ -545,19 +550,25 @@ export default {
       this.selectedWaiter = this.waiters.find((item) => this.canSelectWaiter(item))?.slot_position_key || ''
     },
     createEditableEntry(entry) { return { entry_id: entry.entry_id, date: entry.date, is_working: Boolean(entry.is_working), shift_type: entry.shift_type || 'shift', waiters_needed: Number(entry.waiters_needed ?? 1), work_start: entry.work_start || '', work_end: entry.work_end || '', work_hours: entry.work_hours ?? getHoursDifference(entry.work_start, entry.work_end) ?? 0 } },
+    buildDayEditorTitle() {
+      if (!this.dayEditorEntry) return 'Редактирование дня'
+      const dateLabel = this.formatEntryDate(this.dayEditorEntry.date)
+      const waiterLabel = this.selectedWaiterInfo?.label || 'Официант'
+      return `${dateLabel} · ${waiterLabel}`
+    },
     resetDayEditor() {
       if (!this.dayEditorOriginalEntry) return
       this.dayEditorEntry = this.createEditableEntry(this.dayEditorOriginalEntry)
       this.scheduleNotice = 'Изменения для выбранного дня сброшены.'
       this.scheduleError = ''
     },
-    handleDayEditorShiftTypeChange(value) {
+    toggleDayEditorWorkingState() {
       const entry = this.dayEditorEntry
       if (!entry) return
-      const shiftType = String(value || entry.shift_type || '').toLowerCase()
-      if (shiftType === 'off') {
-        entry.shift_type = 'off'
+
+      if (entry.is_working) {
         entry.is_working = false
+        entry.shift_type = 'off'
         entry.waiters_needed = 0
         entry.work_start = ''
         entry.work_end = ''
@@ -565,9 +576,24 @@ export default {
         return
       }
 
+      const original = this.dayEditorOriginalEntry || {}
+      entry.is_working = true
+      entry.shift_type = String(original.shift_type || entry.shift_type || 'shift').toLowerCase()
+      if (!entry.shift_type || entry.shift_type === 'off') entry.shift_type = 'shift'
+      entry.waiters_needed = Number(original.waiters_needed ?? entry.waiters_needed ?? 1) || 1
+      entry.work_start = entry.work_start || original.work_start || '10:00'
+      entry.work_end = entry.work_end || original.work_end || '19:00'
+      this.updateEditableWorkHours(entry)
+    },
+    handleDayEditorShiftTypeChange(value) {
+      const entry = this.dayEditorEntry
+      if (!entry) return
+      const shiftType = String(value || entry.shift_type || '').toLowerCase()
       entry.shift_type = shiftType || 'shift'
       entry.is_working = true
       if (!entry.waiters_needed) entry.waiters_needed = 1
+      entry.work_start = entry.work_start || this.dayEditorOriginalEntry?.work_start || '10:00'
+      entry.work_end = entry.work_end || this.dayEditorOriginalEntry?.work_end || '19:00'
       this.updateEditableWorkHours(entry)
     },
     handleDayEditorTimeChange() { if (this.dayEditorEntry) this.updateEditableWorkHours(this.dayEditorEntry) },
@@ -663,10 +689,6 @@ export default {
         this.scheduleError = error.message || 'Не удалось открепить сотрудника'
       } finally { this.isUnassigningSlot = false }
     },
-    buildGenerationSummary(response) {
-      const summary = { available_staff: response?.available_staff, required_waiters_peak: response?.required_waiters_peak, lack_staff_peak: response?.lack_staff_peak, days_with_shortage: response?.days_with_shortage, shortage_person_days: response?.shortage_person_days }
-      return Object.values(summary).some((value) => value !== undefined && value !== null) ? summary : null
-    },
     buildGenerationNotice(response) {
       const parts = ['Черновик расписания создан']
       if (Number.isFinite(Number(response?.slots_count))) parts.push(`слотов: ${Number(response.slots_count)}`)
@@ -682,7 +704,6 @@ export default {
       try {
         const response = await generateSchedule({ user: this.user, monthDate: this.currentMonth })
         const scheduleId = response?.schedule_id || response?.scheduleId || null
-        this.latestGenerationSummary = this.buildGenerationSummary(response)
         if (scheduleId) await this.loadSchedule({ scheduleId }); else await this.loadSchedule()
         window.dispatchEvent(new CustomEvent('notifications:refresh'))
         this.scheduleNotice = this.buildGenerationNotice(response)
@@ -708,6 +729,22 @@ export default {
       } catch (error) {
         this.scheduleError = error.message || (wasDraft ? 'Не удалось опубликовать расписание' : 'Не удалось перевести расписание в черновик')
       } finally { this.isPublishingSchedule = false }
+    },
+    async handleAddSlot() {
+      if (!this.canAddScheduleSlot || !this.selectedSlotGrade || this.isAddingSlot) return
+      this.isAddingSlot = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+      try {
+        await addScheduleSlot({ scheduleId: this.currentScheduleId, grade: this.selectedSlotGrade, monthDate: this.currentMonth })
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.closeAddSlotModal()
+        this.scheduleNotice = 'Новое место добавлено в черновик.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось добавить место'
+      } finally {
+        this.isAddingSlot = false
+      }
     },
     async handleNotificationsUpdated() { await this.loadSchedule({ scheduleId: this.currentScheduleId }) },
     buildCalendarDay(date, isCurrentMonth) {
@@ -736,7 +773,7 @@ export default {
     formatEntryDate(date) { return new Date(`${date}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) },
     getFallbackEmployeeLabel(item) { return item.waiter_num || item.waiter_num === 0 ? `Официант ${item.waiter_num}` : item.employee_key ? `Сотрудник ${item.employee_key}` : 'Сотрудник' },
     getWaiterMeta(waiter) {
-      const role = waiter.roleDisplay || this.getGradeLabel(waiter.grade) || 'Без категории'
+      const role = this.getGradeLabel(waiter.grade) || waiter.roleDisplay || 'Без категории'
       if (waiter.isClaimed) return `${role} · занято: ${waiter.assigned_employee_name || waiter.assigned_employee_username || 'сотрудник'}`
       return `${role} · свободно`
     },
