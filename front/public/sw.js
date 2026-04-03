@@ -1,6 +1,6 @@
 const CACHE_NAME = 'supra-shell-v1'
-const APP_ASSETS = ['/', '/manifest.webmanifest', '/S_height.png']
-const DEFAULT_ICON = '/S_height.png'
+const APP_ASSETS = ['./manifest.webmanifest', './S_height.png']
+const DEFAULT_ICON = './S_height.png'
 const DEFAULT_URL = '/'
 
 self.addEventListener('install', (event) => {

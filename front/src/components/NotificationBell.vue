@@ -27,13 +27,13 @@
           </div>
           <div class="notification-head-actions">
             <button
-              v-if="canEnablePush"
+              v-if="canTogglePush"
               class="notification-head-action"
               type="button"
               :disabled="isRequestingPushPermission"
-              @click="handleEnablePush"
+              @click="handleTogglePush"
             >
-              {{ isRequestingPushPermission ? t.enablingPush : t.enablePush }}
+              {{ pushButtonLabel }}
             </button>
             <button
               v-if="notifications.length > 0"
@@ -145,6 +145,7 @@ import {
 const POLL_INTERVAL_MS = 15000
 const HIDDEN_NOTIFICATIONS_STORAGE_KEY = 'hidden_notification_ids'
 const SHOWN_SYSTEM_NOTIFICATION_IDS_KEY = 'shown_system_notification_ids'
+const PUSH_ENABLED_STORAGE_KEY = 'push_notifications_enabled'
 
 const readHiddenNotificationIds = () => {
   try {
@@ -164,13 +165,21 @@ const readShownSystemNotificationIds = () => {
   }
 }
 
+const readPushEnabled = () => {
+  try {
+    return localStorage.getItem(PUSH_ENABLED_STORAGE_KEY) === 'true'
+  } catch (error) {
+    return false
+  }
+}
+
 const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   events: '\u0421\u043e\u0431\u044b\u0442\u0438\u044f',
   notifications: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   enablePush: '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c push',
+  disablePush: '\u0412\u044b\u043a\u043b\u044e\u0447\u0438\u0442\u044c push \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   enablingPush: '\u0412\u043a\u043b\u044e\u0447\u0430\u0435\u043c...',
-  pushEnabled: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b',
   pushBlocked: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b',
   clear: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c',
   reading: '\u0427\u0438\u0442\u0430\u0435\u043c...',
@@ -203,18 +212,22 @@ export default {
       notifications: [],
       hiddenNotificationIds: readHiddenNotificationIds(),
       shownSystemNotificationIds: readShownSystemNotificationIds(),
-      systemNotificationPermission: getSystemNotificationPermission()
+      systemNotificationPermission: getSystemNotificationPermission(),
+      pushEnabled: readPushEnabled()
     }
   },
   computed: {
     badgeLabel() {
       return this.unreadCount > 99 ? '99+' : String(this.unreadCount)
     },
-    canEnablePush() {
-      return supportsSystemNotifications() && this.systemNotificationPermission === 'default'
+    canTogglePush() {
+      return supportsSystemNotifications() && this.systemNotificationPermission !== 'denied'
+    },
+    pushButtonLabel() {
+      if (this.isRequestingPushPermission) return this.t.enablingPush
+      return this.pushEnabled ? this.t.disablePush : this.t.enablePush
     },
     pushStateLabel() {
-      if (this.systemNotificationPermission === 'granted') return this.t.pushEnabled
       if (this.systemNotificationPermission === 'denied') return this.t.pushBlocked
       return ''
     }
@@ -298,7 +311,7 @@ export default {
         this.notifications = this.isOpen ? notifications : this.notifications
         this.unreadCount = notifications.filter((item) => !item.read).length
 
-        if (showSystem && this.systemNotificationPermission === 'granted') {
+        if (showSystem && this.pushEnabled && this.systemNotificationPermission === 'granted') {
           const hiddenIds = new Set(this.hiddenNotificationIds)
           const shownIds = new Set(this.shownSystemNotificationIds)
           const freshNotifications = notifications.filter((item) => !item.read && item.id && !hiddenIds.has(item.id) && !shownIds.has(item.id))
@@ -346,15 +359,27 @@ export default {
         await this.refreshNotifications()
       }
     },
-    async handleEnablePush() {
-      if (!this.canEnablePush || this.isRequestingPushPermission) return
+    async handleTogglePush() {
+      if (!this.canTogglePush || this.isRequestingPushPermission) return
       this.isRequestingPushPermission = true
       this.error = ''
 
       try {
-        this.systemNotificationPermission = await requestSystemNotificationPermission()
-        if (this.systemNotificationPermission === 'granted') {
-          await this.syncNotifications({ silent: true, showSystem: false })
+        if (!this.pushEnabled) {
+          this.systemNotificationPermission = await requestSystemNotificationPermission()
+          if (this.systemNotificationPermission === 'granted') {
+            this.pushEnabled = true
+            localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'true')
+            await this.syncNotifications({ silent: true, showSystem: false })
+          }
+        } else {
+          this.pushEnabled = false
+          localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'false')
+          const registration = await navigator.serviceWorker.ready
+          const subscription = await registration.pushManager.getSubscription()
+          if (subscription) {
+            await subscription.unsubscribe().catch(() => undefined)
+          }
         }
       } catch (error) {
         this.error = error?.message || this.t.loadError

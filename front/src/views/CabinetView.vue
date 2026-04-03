@@ -38,6 +38,7 @@
           <span></span>
           <span></span>
         </button>
+        <img :src="logoSupra" alt="Supra" class="cabinet-brand-logo" />
         <NotificationBell />
       </div>
     </header>
@@ -578,6 +579,7 @@ import '../assets/cabinet.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
+import logoSupra from '../assets/Logo_supra.png'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { uploadHistoricalForecastFile } from '../services/forecast'
 
@@ -663,6 +665,7 @@ export default {
 
     return {
       menuOpen: false,
+      logoSupra,
       showEmployeesModal: false,
       showManageEmployeeModal: false,
       showCreateRoleModal: false,

@@ -2,7 +2,7 @@
 
 const DEFAULT_TITLE = '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435'
 const ERROR_ID = '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f'
-const PUSH_ICON_URL = '/S_height.png'
+const PUSH_ICON_URL = `${import.meta.env.BASE_URL}S_height.png`
 
 const asArray = (payload) => {
   if (Array.isArray(payload)) return payload

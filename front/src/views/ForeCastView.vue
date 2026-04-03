@@ -19,19 +19,25 @@
       </aside>
     </transition>
 
+    <header class="forecast-header">
+      <div class="forecast-header-actions">
+        <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <img :src="logoSupra" alt="Supra" class="forecast-brand-logo" />
+        <NotificationBell @updated="handleNotificationsUpdated" />
+      </div>
+    </header>
+
     <main class="forecast-content">
       <section class="forecast-card">
         <div class="forecast-card-top">
-          <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
           <div class="forecast-heading">
             <p class="forecast-subtitle">График работы</p>
             <h1 class="forecast-title">Расписание</h1>
           </div>
-          <NotificationBell @updated="handleNotificationsUpdated" />
         </div>
 
         <div class="month-toolbar">
@@ -250,6 +256,7 @@ import '../assets/forecast.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
+import logoSupra from '../assets/Logo_supra.png'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { addScheduleSlot, assignScheduleSlot, claimScheduleSlot, deleteScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
 
@@ -331,6 +338,7 @@ export default {
   data() {
     return {
       menuOpen: false,
+      logoSupra,
       currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
       currentScheduleId: null,
       currentScheduleStatus: null,

@@ -42,7 +42,7 @@
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
-  padding: 18px 14px 0;
+  padding: 12px 14px 0;
 }
 
 .cabinet-header-actions {
@@ -50,6 +50,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.cabinet-brand-logo {
+  width: 96px;
+  height: auto;
+  object-fit: contain;
 }
 
 .menu-button {
@@ -270,7 +276,7 @@
 
 @media (max-width: 420px) {
   .cabinet-header {
-    padding: 14px 12px 0;
+    padding: 10px 12px 0;
   }
 
   .menu-button {
@@ -282,6 +288,10 @@
 
   .cabinet-content {
     padding: 14px 12px 90px;
+  }
+
+  .cabinet-brand-logo {
+    width: 82px;
   }
 
   .profile-card {
@@ -315,11 +325,15 @@
 
 @media (min-width: 421px) and (max-width: 768px) {
   .cabinet-header {
-    padding: 18px 16px 0;
+    padding: 12px 16px 0;
   }
 
   .cabinet-content {
     padding: 18px 16px 100px;
+  }
+
+  .cabinet-brand-logo {
+    width: 90px;
   }
 
   .profile-card {
@@ -333,7 +347,7 @@
 
 @media (min-width: 769px) {
   .cabinet-header {
-    padding: 28px 24px 0;
+    padding: 16px 24px 0;
   }
 
   .cabinet-content {
