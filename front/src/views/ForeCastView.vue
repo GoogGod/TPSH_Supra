@@ -116,12 +116,11 @@
             <div v-if="showAssignPanel && canManageSchedule" class="assign-panel">
               <label class="assign-panel-field">
                 <span>Выберите сотрудника</span>
-                <select v-model="selectedEmployeeToAssign">
-                  <option disabled value="">Выберите сотрудника</option>
-                  <option v-for="employee in assignableEmployees" :key="employee.id" :value="employee.id">
-                    {{ getEmployeeOptionLabel(employee) }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="selectedEmployeeToAssign"
+                  :options="assignableEmployeeOptions"
+                  placeholder="Выберите сотрудника"
+                />
               </label>
               <div class="assign-panel-actions">
                 <button class="claim-slot-button" :disabled="!selectedEmployeeToAssign || isAssigningSlot" @click="handleAssignSelectedWaiter">{{ isAssigningSlot ? 'Закрепляем...' : 'Подтвердить' }}</button>
@@ -158,13 +157,12 @@
               <div class="schedule-editor-grid">
                 <label class="schedule-editor-field">
                   <span>Тип смены</span>
-                  <select v-model="entry.shift_type" :disabled="!entry.is_working">
-                    <option value="morning">Утро</option>
-                    <option value="evening">Вечер</option>
-                    <option value="full">Полный день</option>
-                    <option value="shift">Смена</option>
-                    <option value="off">Выходной</option>
-                  </select>
+                  <ThemedSelect
+                    v-model="entry.shift_type"
+                    :options="shiftTypeOptions"
+                    :disabled="!entry.is_working"
+                    placeholder="Тип смены"
+                  />
                 </label>
                 <label class="schedule-editor-field">
                   <span>Нужно официантов</span>
@@ -231,6 +229,7 @@
 import '../assets/forecast.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
+import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, updateScheduleEntriesBulk } from '../services/schedule'
 
@@ -264,7 +263,7 @@ const buildComparableEntryState = (entry) => ({
 
 export default {
   name: 'ForeCastView',
-  components: { NotificationBell },
+  components: { NotificationBell, ThemedSelect },
   data() {
     return {
       menuOpen: false,
@@ -371,6 +370,21 @@ export default {
         if (this.assignedEmployeeIds.includes(employeeId)) return false
         return !grade || role === grade
       })
+    },
+    assignableEmployeeOptions() {
+      return this.assignableEmployees.map((employee) => ({
+        value: employee.id,
+        label: this.getEmployeeOptionLabel(employee)
+      }))
+    },
+    shiftTypeOptions() {
+      return [
+        { value: 'morning', label: 'Утро' },
+        { value: 'evening', label: 'Вечер' },
+        { value: 'full', label: 'Полный день' },
+        { value: 'shift', label: 'Смена' },
+        { value: 'off', label: 'Выходной' }
+      ]
     },
     monthTitle() { return this.currentMonth.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) },
     calendarDays() {

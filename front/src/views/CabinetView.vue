@@ -217,21 +217,21 @@
 
               <label class="form-field">
                 <span>Роль *</span>
-                <select v-model="manageEmployeeForm.role" :disabled="isSavingManagedEmployee">
-                  <option v-for="option in availableRoleOptions" :key="`manage-role-${option.value}`" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="manageEmployeeForm.role"
+                  :options="availableRoleOptions"
+                  :disabled="isSavingManagedEmployee"
+                />
               </label>
 
               <label class="form-field form-field-full">
                 <span>Заведение</span>
-                <select v-model="manageEmployeeForm.venue" :disabled="isSavingManagedEmployee">
-                  <option value="">Без заведения</option>
-                  <option v-for="venue in venues" :key="`manage-venue-${venue.id}`" :value="venue.id">
-                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="manageEmployeeForm.venue"
+                  :options="manageVenueOptions"
+                  :disabled="isSavingManagedEmployee"
+                  placeholder="Без заведения"
+                />
               </label>
             </div>
 
@@ -364,15 +364,11 @@
 
               <label class="form-field">
                 <span>Роль *</span>
-                <select v-model="createRoleForm.role" :disabled="isCreatingRole">
-                  <option
-                    v-for="option in availableRoleOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="createRoleForm.role"
+                  :options="availableRoleOptions"
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label
@@ -392,16 +388,12 @@
                 class="form-field form-field-full"
               >
                 <span>Заведение</span>
-                <select v-model="createRoleForm.venue" :disabled="isCreatingRole">
-                  <option disabled value="">Выберите ресторан</option>
-                  <option
-                    v-for="venue in venues"
-                    :key="venue.id"
-                    :value="venue.id"
-                  >
-                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="createRoleForm.venue"
+                  :options="venueOptions"
+                  :disabled="isCreatingRole"
+                  placeholder="Выберите ресторан"
+                />
               </label>
             </div>
 
@@ -456,16 +448,12 @@
 
               <label class="form-field form-field-full">
                 <span>Заведение по умолчанию</span>
-                <select v-model="forecastUploadVenueId" :disabled="isUploadingForecastData">
-                  <option value="">Из файла или не указывать</option>
-                  <option
-                    v-for="venue in venues"
-                    :key="`forecast-venue-${venue.id}`"
-                    :value="venue.id"
-                  >
-                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="forecastUploadVenueId"
+                  :options="forecastVenueOptions"
+                  :disabled="isUploadingForecastData"
+                  placeholder="Из файла или не указывать"
+                />
               </label>
             </div>
 
@@ -589,6 +577,7 @@
 import '../assets/cabinet.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
+import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { uploadHistoricalForecastFile } from '../services/forecast'
 
@@ -660,7 +649,8 @@ const getVenueId = (entity) => {
 export default {
   name: 'CabinetView',
   components: {
-    NotificationBell
+    NotificationBell,
+    ThemedSelect
   },
   data() {
     let savedUser = null
@@ -807,6 +797,24 @@ export default {
         { key: 'manager', title: 'Менеджеры', items: this.groupedEmployees.manager },
         { key: 'employee_noob', title: 'Официанты-стажеры', items: this.groupedEmployees.employee_noob },
         { key: 'employee_pro', title: 'Официанты-профи', items: this.groupedEmployees.employee_pro }
+      ]
+    },
+    venueOptions() {
+      return this.venues.map((venue) => ({
+        value: venue.id,
+        label: venue.venue_name || venue.name || `Заведение #${venue.id}`
+      }))
+    },
+    manageVenueOptions() {
+      return [
+        { value: '', label: 'Без заведения' },
+        ...this.venueOptions
+      ]
+    },
+    forecastVenueOptions() {
+      return [
+        { value: '', label: 'Из файла или не указывать' },
+        ...this.venueOptions
       ]
     }
   },
@@ -1252,7 +1260,8 @@ export default {
         email: this.manageEmployeeForm.email.trim(),
         first_name: this.manageEmployeeForm.first_name.trim(),
         last_name: this.manageEmployeeForm.last_name.trim(),
-        phone: this.manageEmployeeForm.phone.trim()
+        phone: this.manageEmployeeForm.phone.trim(),
+        role: this.manageEmployeeForm.role || 'employee_noob'
       }
 
       if (this.manageEmployeeForm.venue !== '' && this.manageEmployeeForm.venue !== null && this.manageEmployeeForm.venue !== undefined) {
@@ -1429,12 +1438,6 @@ export default {
 
       try {
         await api.patch(`/users/${this.manageEmployeeForm.id}/`, this.buildManageEmployeePayload())
-
-        if (normalizeRole(this.manageEmployeeForm.role) !== normalizeRole(this.managedEmployeeOriginal?.role)) {
-          await api.patch(`/users/${this.manageEmployeeForm.id}/role`, {
-            role: this.manageEmployeeForm.role
-          })
-        }
 
         if (Number(this.manageEmployeeForm.id) === Number(this.user?.id)) {
           const freshUser = await fetchCurrentUser()

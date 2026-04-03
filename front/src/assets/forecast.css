@@ -232,16 +232,15 @@
 .assign-panel-field select {
   width: 100%;
   min-height: 46px;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 0 14px;
-  background: rgba(255, 255, 255, 0.08);
+  padding: 0 46px 0 14px;
+  background-color: rgba(255, 255, 255, 0.08);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10' fill='none'%3E%3Cpath d='M2 2.25L7 7.25L12 2.25' stroke='%23E7EFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 14px 10px;
   color: #ffffff;
-}
-
-.assign-panel-field select option {
-  color: #0f173d;
-  background: #ffffff;
 }
 
 .assign-panel-actions {
@@ -300,11 +299,6 @@
   gap: 10px;
   overflow-x: auto;
   padding-bottom: 2px;
-  scrollbar-width: none;
-}
-
-.waiter-button-list::-webkit-scrollbar {
-  display: none;
 }
 
 .waiter-button {
@@ -860,13 +854,17 @@
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 0 12px;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
 
-.schedule-editor-field select option {
-  color: #0f173d;
-  background: #ffffff;
+.schedule-editor-field select {
+  border-radius: 18px;
+  padding-right: 46px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='10' viewBox='0 0 14 10' fill='none'%3E%3Cpath d='M2 2.25L7 7.25L12 2.25' stroke='%23E7EFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 14px 10px;
 }
 
 .schedule-editor-field-wide {
