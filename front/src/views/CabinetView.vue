@@ -32,12 +32,13 @@
     </transition>
 
     <header class="cabinet-header">
-      <div class="menu-container">
+      <div class="cabinet-header-actions">
         <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
           <span></span>
           <span></span>
           <span></span>
         </button>
+        <NotificationBell />
       </div>
     </header>
 
@@ -75,45 +76,9 @@
           </button>
         </section>
 
-        <section v-if="canSeeClaimNotifications" class="notifications-card">
-          <div class="notifications-head">
-            <div>
-              <p class="notifications-subtitle">События</p>
-              <h2 class="notifications-title">Уведомления</h2>
-            </div>
-            <span class="notifications-count">{{ visibleNotifications.length }}</span>
-          </div>
-
-          <div v-if="visibleNotifications.length === 0" class="notifications-empty">
-            Пока нет новых уведомлений.
-          </div>
-
-          <div v-else class="notifications-list">
-            <article
-              v-for="notification in visibleNotifications"
-              :key="notification.id"
-              class="notification-item"
-            >
-              <div class="notification-copy">
-                <strong>{{ notification.title }}</strong>
-                <p>{{ notification.message }}</p>
-                <span>{{ formatNotificationDate(notification.created_at) }}</span>
-              </div>
-
-              <button
-                v-if="currentUserRole === 'admin'"
-                class="notification-read-button"
-                @click="markNotificationAsRead(notification.id)"
-              >
-                Отметить просмотренным
-              </button>
-            </article>
-          </div>
-        </section>
-
         <div class="manager-actions">
           <button class="wide-button secondary" @click="openEmployeesModal">
-            Посмотреть сотрудников
+            Просмотр сотрудников
           </button>
 
           <button
@@ -121,7 +86,7 @@
             class="wide-button secondary"
             @click="openCreateRoleModal"
           >
-            Добавить сотрудника
+            Создание сотрудника
           </button>
         </div>
       </section>
@@ -385,7 +350,7 @@
               <p class="modal-subtitle">Admin</p>
               <h2 class="modal-title">Загрузка исторических данных</h2>
             </div>
-            <button class="modal-close" @click="closeUploadDataModal">Г—</button>
+            <button class="modal-close" @click="closeUploadDataModal">×</button>
           </div>
 
           <form class="role-form" @submit.prevent="submitForecastDataUpload">
@@ -402,7 +367,7 @@
                 <span>Файл с данными *</span>
                 <input
                   type="file"
-                  accept=".json,.csv,application/json,text/csv"
+                  accept=".xlsx,.xls,.csv,.json,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                   :disabled="isUploadingForecastData"
                   @change="handleForecastFileChange"
                 />
@@ -426,22 +391,11 @@
             <div class="upload-format-note">
               <strong>Поддерживаемые поля:</strong>
               <p>`date`, `load` или `actual_load`, а также `venue` или `venue_id`.</p>
-              <p>Пример CSV: `date,load,venue`</p>
-              <p>Пример JSON: `[{ "date": "2026-04-01", "load": 154, "venue": 1 }]`</p>
+              <p>Также поддерживаются колонки: `Учетный день`, `Количество гостей`, `заказов`.</p>
             </div>
 
-            <div v-if="forecastUploadFileName || forecastUploadPreview.length" class="upload-preview-card">
+            <div v-if="forecastUploadFileName" class="upload-preview-card">
               <p v-if="forecastUploadFileName"><strong>Файл:</strong> {{ forecastUploadFileName }}</p>
-              <p v-if="forecastUploadPreview.length"><strong>Записей к загрузке:</strong> {{ forecastUploadPreview.length }}</p>
-              <div v-if="forecastUploadPreview.length" class="upload-preview-list">
-                <div
-                  v-for="(item, index) in forecastUploadPreview.slice(0, 3)"
-                  :key="`${item.date}-${index}`"
-                  class="upload-preview-item"
-                >
-                  {{ item.date }} · загрузка {{ item.load }} · заведение {{ item.venue || 'не указано' }}
-                </div>
-              </div>
             </div>
 
             <div class="form-actions">
@@ -456,7 +410,7 @@
               <button
                 type="submit"
                 class="wide-button"
-                :disabled="isUploadingForecastData || !forecastUploadPreview.length"
+                :disabled="isUploadingForecastData"
               >
                 {{ isUploadingForecastData ? 'Загружаем...' : 'Отправить в БД' }}
               </button>
@@ -471,9 +425,9 @@
 <script>
 import '../assets/cabinet.css'
 import api from '../api'
+import NotificationBell from '../components/NotificationBell.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { uploadHistoricalForecastData } from '../services/forecast'
-import { getProfileNotifications, markProfileNotificationRead } from '../services/profileNotifications'
+import { uploadHistoricalForecastFile } from '../services/forecast'
 
 const ROLE_LABELS = {
   admin: 'Администратор',
@@ -524,6 +478,9 @@ const getVenueId = (entity) => {
 
 export default {
   name: 'CabinetView',
+  components: {
+    NotificationBell
+  },
   data() {
     let savedUser = null
 
@@ -547,10 +504,10 @@ export default {
       uploadDataError: '',
       uploadDataSuccess: '',
       copyNotice: '',
-      notifications: [],
       employees: [],
       venues: [],
       forecastUploadVenueId: '',
+      forecastUploadFile: null,
       forecastUploadFileName: '',
       forecastUploadPreview: [],
       createRoleForm: getDefaultCreateRoleForm(),
@@ -579,30 +536,8 @@ export default {
     currentVenueLabel() {
       return this.getVenueLabel(this.user)
     },
-    canSeeClaimNotifications() {
-      return this.currentUserRole === 'manager' || this.currentUserRole === 'admin'
-    },
     roleRu() {
       return ROLE_LABELS[this.currentUserRole] || this.user.role || 'Не указано'
-    },
-    visibleNotifications() {
-      const currentVenueId = this.currentVenueId
-
-      return this.notifications.filter((notification) => {
-        if (notification.read) {
-          return false
-        }
-
-        if (this.currentUserRole === 'admin') {
-          return notification.audience === 'admin' || !notification.audience
-        }
-
-        if (notification.audience === 'admin') {
-          return false
-        }
-
-        return Number(notification.venue) === Number(currentVenueId)
-      })
     },
     availableRoleOptions() {
       if (this.currentUserRole === 'manager') {
@@ -702,8 +637,6 @@ export default {
     if (this.currentUserRole === 'admin') {
       await this.loadVenues()
     }
-
-    this.loadNotifications()
   },
   beforeUnmount() {
     if (this.copyNoticeTimer) {
@@ -711,30 +644,6 @@ export default {
     }
   },
   methods: {
-    loadNotifications() {
-      this.notifications = getProfileNotifications()
-    },
-    markNotificationAsRead(notificationId) {
-      markProfileNotificationRead(notificationId)
-      this.loadNotifications()
-    },
-    formatNotificationDate(value) {
-      if (!value) {
-        return ''
-      }
-
-      try {
-        return new Date(value).toLocaleString('ru-RU', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-      } catch (error) {
-        return String(value)
-      }
-    },
     getRoleLabel(role) {
       return ROLE_LABELS[normalizeRole(role)] || role || 'Не указано'
     },
@@ -835,6 +744,7 @@ export default {
       this.showUploadDataModal = true
       this.uploadDataError = ''
       this.uploadDataSuccess = ''
+      this.forecastUploadFile = null
       this.forecastUploadFileName = ''
       this.forecastUploadPreview = []
       this.forecastUploadVenueId = ''
@@ -847,6 +757,7 @@ export default {
       this.showUploadDataModal = false
       this.uploadDataError = ''
       this.uploadDataSuccess = ''
+      this.forecastUploadFile = null
       this.forecastUploadFileName = ''
       this.forecastUploadPreview = []
       this.forecastUploadVenueId = ''
@@ -856,32 +767,12 @@ export default {
 
       this.uploadDataError = ''
       this.uploadDataSuccess = ''
+      this.forecastUploadFile = file || null
       this.forecastUploadFileName = file?.name || ''
       this.forecastUploadPreview = []
 
       if (!file) {
         return
-      }
-
-      try {
-        const content = await file.text()
-        const rawRecords = file.name.toLowerCase().endsWith('.csv')
-          ? this.parseForecastCsv(content)
-          : this.parseForecastJson(content)
-
-        const normalized = rawRecords
-          .map((item) => this.normalizeForecastRecord(item))
-          .filter(Boolean)
-
-        if (!normalized.length) {
-          throw new Error('В файле не найдено подходящих записей')
-        }
-
-        this.forecastUploadPreview = normalized
-      } catch (error) {
-        this.forecastUploadFileName = ''
-        this.forecastUploadPreview = []
-        this.uploadDataError = error?.message || 'Не удалось прочитать файл'
       }
     },
     parseForecastJson(content) {
@@ -915,24 +806,94 @@ export default {
         return []
       }
 
-      const headers = rows[0].split(',').map((cell) => cell.trim())
+      const firstRow = rows[0].replace(/^\uFEFF/, '')
+      const delimiter = firstRow.includes(';') ? ';' : firstRow.includes('\t') ? '\t' : ','
+      const headers = firstRow.split(delimiter).map((cell) => cell.trim())
 
       return rows.slice(1).map((row) => {
-        const values = row.split(',').map((cell) => cell.trim())
+        const values = row.split(delimiter).map((cell) => cell.trim())
         return headers.reduce((accumulator, header, index) => {
           accumulator[header] = values[index] ?? ''
           return accumulator
         }, {})
       })
     },
+    getRecordValue(record, keys = []) {
+      for (const key of keys) {
+        if (record[key] !== undefined && record[key] !== null && String(record[key]).trim() !== '') {
+          return record[key]
+        }
+      }
+
+      return ''
+    },
+    normalizeForecastDate(rawValue) {
+      const value = String(rawValue || '').trim()
+
+      if (!value) {
+        return ''
+      }
+
+      const datePart = value.includes(' ') ? value.split(' ')[0] : value
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+        return datePart
+      }
+
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(datePart)) {
+        const [day, month, year] = datePart.split('.')
+        return `${year}-${month}-${day}`
+      }
+
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(datePart)) {
+        const [day, month, year] = datePart.split('/')
+        return `${year}-${month}-${day}`
+      }
+
+      return datePart
+    },
+    parseForecastLoad(rawValue) {
+      const value = String(rawValue ?? '').trim()
+
+      if (!value) {
+        return Number.NaN
+      }
+
+      const normalized = value
+        .replace(/\s/g, '')
+        .replace(/,/g, '')
+        .replace(/[^\d.-]/g, '')
+
+      return Number(normalized)
+    },
     normalizeForecastRecord(record) {
       if (!record || typeof record !== 'object') {
         return null
       }
 
-      const date = String(record.date || record.day || record.shift_date || '').trim()
-      const rawLoad = record.load ?? record.actual_load ?? record.predicted_load ?? record.value
-      const load = Number(rawLoad)
+      const rawDate = this.getRecordValue(record, [
+        'date',
+        'day',
+        'shift_date',
+        'Учетный день',
+        'учетный день',
+        'Дата',
+        'дата'
+      ])
+      const date = this.normalizeForecastDate(rawDate)
+
+      const rawLoad = this.getRecordValue(record, [
+        'load',
+        'actual_load',
+        'predicted_load',
+        'value',
+        'Количество гостей',
+        'количество гостей',
+        'заказов',
+        'Заказов'
+      ])
+      const load = this.parseForecastLoad(rawLoad)
+
       const rawVenue = record.venue ?? record.venue_id ?? this.forecastUploadVenueId ?? ''
       const venue = rawVenue === '' || rawVenue === null || rawVenue === undefined ? null : Number(rawVenue)
 
@@ -953,42 +914,31 @@ export default {
       return normalized
     },
     async submitForecastDataUpload() {
-      if (!this.forecastUploadPreview.length) {
-        this.uploadDataError = 'Сначала выберите файл с данными'
+      if (!this.forecastUploadFile) {
+        this.uploadDataError = 'Сначала выберите файл'
         return
       }
 
       const defaultVenueId = this.forecastUploadVenueId ? Number(this.forecastUploadVenueId) : null
-      const payload = this.forecastUploadPreview.map((item) => {
-        if (item.venue || !Number.isFinite(defaultVenueId)) {
-          return item
-        }
-
-        return {
-          ...item,
-          venue: defaultVenueId,
-          venue_id: defaultVenueId
-        }
-      })
-
-      if (payload.some((item) => !item.venue && !item.venue_id)) {
-        this.uploadDataError = 'Укажите заведение в файле или выберите заведение по умолчанию'
-        return
-      }
 
       this.isUploadingForecastData = true
       this.uploadDataError = ''
       this.uploadDataSuccess = ''
 
       try {
-        const response = await uploadHistoricalForecastData(payload)
+        const response = await uploadHistoricalForecastFile(this.forecastUploadFile, {
+          venueId: Number.isFinite(defaultVenueId) ? defaultVenueId : null
+        })
         const savedCount =
           Number(response?.created) ||
           Number(response?.count) ||
           Number(response?.created_count) ||
-          this.forecastUploadPreview.length
+          Number(response?.saved) ||
+          0
 
-        this.uploadDataSuccess = `Данные загружены в БД. Сохранено записей: ${savedCount}.`
+        this.uploadDataSuccess = savedCount
+          ? `Данные загружены в БД. Сохранено записей: ${savedCount}.`
+          : 'Файл отправлен в БД.'
       } catch (error) {
         this.uploadDataError = error?.message || 'Не удалось загрузить данные в БД'
       } finally {
@@ -1089,6 +1039,23 @@ export default {
       try {
         await api.post('/auth/register/', this.buildCreateRolePayload())
         this.createRoleSuccess = 'Сотрудник успешно создан'
+        this.createRoleForm = {
+          ...getDefaultCreateRoleForm(),
+          venue:
+            this.currentUserRole === 'manager'
+              ? this.currentVenueId || ''
+              : this.currentUserRole === 'admin'
+                ? ''
+                : '',
+          venue_name:
+            this.currentUserRole === 'manager'
+              ? this.currentVenueLabel
+              : ''
+        }
+
+        if (this.currentUserRole === 'manager') {
+          this.createRoleForm.role = 'employee_noob'
+        }
 
         if (this.showEmployeesModal) {
           await this.loadEmployees()

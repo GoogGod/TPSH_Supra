@@ -22,7 +22,7 @@
     <main class="forecast-content">
       <section class="forecast-card">
         <div class="forecast-card-top">
-                    <button
+          <button
             class="menu-button"
             @click="openMenu"
             aria-label="Открыть меню"
@@ -31,10 +31,11 @@
             <span></span>
             <span></span>
           </button>
-                    <div class="forecast-heading">
+          <div class="forecast-heading">
             <p class="forecast-subtitle">График работы</p>
             <h1 class="forecast-title">Расписание</h1>
           </div>
+          <NotificationBell @updated="handleNotificationsUpdated" />
         </div>
         <div class="month-toolbar">
           <div class="month-switcher">
@@ -43,7 +44,6 @@
             <button class="month-button" :disabled="isMonthSwitching" @click="nextMonth">›</button>
           </div>
           <button v-if="canManageSchedule" class="create-schedule-button" :disabled="isGeneratingSchedule" @click="handleCreateSchedule">{{ isGeneratingSchedule ? 'Создаем...' : 'Создать расписание' }}</button>
-          <button v-if="canPublishCurrentSchedule" class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
         </div>
         <div class="schedule-info-row">
           <div v-if="scheduleNotice" class="schedule-status-card is-success">{{ scheduleNotice }}</div>
@@ -101,6 +101,11 @@
             </div>
           </div>
         </div>
+        <div v-if="canPublishCurrentSchedule || canUploadForecastData" class="bottom-actions">
+          <button v-if="canPublishCurrentSchedule" class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
+          <button v-if="canUploadForecastData" class="upload-data-button" :disabled="isUploadingForecastData" @click="openForecastUploadDialog">{{ isUploadingForecastData ? 'Загружаем данные...' : 'Подгрузить данные' }}</button>
+          <input ref="forecastFileInput" type="file" class="visually-hidden-input" accept=".xlsx,.xls,.csv" @change="handleForecastFileChange" />
+        </div>
       </section>
     </main>
   </div>
@@ -109,9 +114,10 @@
 <script>
 import '../assets/forecast.css'
 import api from '../api'
+import NotificationBell from '../components/NotificationBell.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot } from '../services/schedule'
-import { pushProfileNotification } from '../services/profileNotifications'
+import { uploadHistoricalForecastFile } from '../services/forecast'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 const WAITER_COLORS = [
@@ -131,9 +137,12 @@ const getVenueId = (entity) => { const raw = entity?.venue_id ?? entity?.venue?.
 
 export default {
   name: 'ForeCastView',
-  data() { return { menuOpen:false,currentMonth:new Date(new Date().getFullYear(),new Date().getMonth(),1),currentScheduleId:null,currentScheduleStatus:null,selectedWaiter:'',selectedEmployeeToAssign:'',showAssignPanel:false,weekdays:['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],scheduleRaw:[],scheduleExists:false,scheduleError:'',scheduleNotice:'',isLoadingSchedule:false,isMonthSwitching:false,isGeneratingSchedule:false,isPublishingSchedule:false,isClaimingSlot:false,isUnassigningSlot:false,isAssigningSlot:false,employees:[],user:(() => { try { return JSON.parse(localStorage.getItem('user')) || { role:'' } } catch (error) { return { role:'' } } })() } },
+  components: {
+    NotificationBell
+  },
+  data() { return { menuOpen:false,currentMonth:new Date(new Date().getFullYear(),new Date().getMonth(),1),currentScheduleId:null,currentScheduleStatus:null,selectedWaiter:'',selectedEmployeeToAssign:'',showAssignPanel:false,weekdays:['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],scheduleRaw:[],scheduleExists:false,scheduleError:'',scheduleNotice:'',isLoadingSchedule:false,isMonthSwitching:false,isGeneratingSchedule:false,isPublishingSchedule:false,isClaimingSlot:false,isUnassigningSlot:false,isAssigningSlot:false,isUploadingForecastData:false,employees:[],user:(() => { try { return JSON.parse(localStorage.getItem('user')) || { role:'' } } catch (error) { return { role:'' } } })() } },
   computed: {
-    currentUserRole() { return normalizeRole(this.user.role) }, currentVenueId() { return getVenueId(this.user) }, canManageSchedule() { return ['manager','admin'].includes(this.currentUserRole) }, isWaiterView() { return !this.canManageSchedule }, hasSchedule() { return this.scheduleExists },
+    currentUserRole() { return normalizeRole(this.user.role) }, currentVenueId() { return getVenueId(this.user) }, isAdmin() { return this.currentUserRole === 'admin' }, canManageSchedule() { return ['manager','admin'].includes(this.currentUserRole) }, canUploadForecastData() { return this.isAdmin }, isWaiterView() { return !this.canManageSchedule }, hasSchedule() { return this.scheduleExists },
     canPublishCurrentSchedule() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && this.currentScheduleStatus === 'draft' },
     roleHint() { if (this.canManageSchedule) return this.currentScheduleStatus === 'draft' ? 'Открылся черновик расписания. Проверьте его и затем опубликуйте.' : 'Выберите место и управляйте закреплениями сотрудников.'; return 'Выберите место и закрепитесь за ним. Официант может быть закреплен только за одним местом.' },
     selectorDescription() { if (this.waiters.length === 0) return 'Кнопки появятся, когда в расписании будут доступные места.'; return this.canManageSchedule ? 'Менеджер может закреплять свободных сотрудников на места и снимать их.' : 'Доступны только места вашей категории. Закрепиться можно только за одним местом.' },
@@ -164,24 +173,39 @@ export default {
   async mounted() { if (!USE_MOCK_AUTH) { try { const freshUser = await fetchCurrentUser(); this.user = freshUser; localStorage.setItem('user',JSON.stringify(freshUser)) } catch (error) { const saved = localStorage.getItem('user'); if (saved) { try { this.user = JSON.parse(saved) } catch (parseError) { this.user = { role:'' } } } } } if (this.canManageSchedule) await this.loadEmployees(); await this.loadSchedule() },
   methods: {
     async loadEmployees() { if (USE_MOCK_AUTH) return; try { const response = await api.get('/users/'); this.employees = asArray(response.data) } catch (error) { this.employees = [] } },
+    openForecastUploadDialog() { if (!this.canUploadForecastData || this.isUploadingForecastData) return; this.$refs.forecastFileInput?.click() },
+    async handleForecastFileChange(event) {
+      const input = event?.target
+      const file = input?.files?.[0]
+      if (!file) return
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+      this.isUploadingForecastData = true
+      try {
+        await uploadHistoricalForecastFile(file)
+        this.scheduleNotice = 'Файл с историческими данными загружен.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось загрузить исторические данные'
+      } finally {
+        this.isUploadingForecastData = false
+        if (input) input.value = ''
+      }
+    },
     async handleLogout() { this.menuOpen = false; await logoutUser(); this.$router.replace('/login') }, openMenu() { this.menuOpen = true }, closeMenu() { this.menuOpen = false }, goToProfile() { this.menuOpen = false; this.$router.push('/cabinet') }, clearScheduleNotice() { this.scheduleNotice = '' },
     openAssignPanel() { if (!this.canOpenAssignPanel) return; this.selectedEmployeeToAssign = ''; this.showAssignPanel = true }, closeAssignPanel() { this.selectedEmployeeToAssign = ''; this.showAssignPanel = false },
     async prevMonth() { this.clearScheduleNotice(); this.currentMonth = new Date(this.currentMonth.getFullYear(),this.currentMonth.getMonth() - 1,1); await this.loadSchedule({ isMonthSwitching:true }) },
     async nextMonth() { this.clearScheduleNotice(); this.currentMonth = new Date(this.currentMonth.getFullYear(),this.currentMonth.getMonth() + 1,1); await this.loadSchedule({ isMonthSwitching:true }) },
-    pushAdminOpenSlotsNotification() { const openCount = this.waiters.filter((waiter) => !waiter.isClaimed).length; if (!openCount || this.currentVenueId === null) return; pushProfileNotification({ venue:this.currentVenueId,audience:'admin',type:'unclaimed-slots',dedupe_key:`unclaimed-${this.currentVenueId}-${this.currentMonth.getFullYear()}-${this.currentMonth.getMonth() + 1}`,title:'Есть незакрепленные места',message:`На ${this.monthTitle} осталось незакрепленных мест: ${openCount}.` }) },
-    async loadSchedule({ isMonthSwitching = false, scheduleId = null } = {}) { this.scheduleError = ''; this.isLoadingSchedule = !isMonthSwitching; this.isMonthSwitching = isMonthSwitching; this.closeAssignPanel(); try { const schedule = await fetchScheduleForMonth({ monthDate:this.currentMonth,user:this.user,scheduleId }); this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []; this.scheduleExists = Boolean(schedule.scheduleExists); this.currentScheduleId = schedule.scheduleId || null; this.currentScheduleStatus = schedule.scheduleStatus || null; this.syncSelectedWaiter(); this.pushAdminOpenSlotsNotification() } catch (error) { this.scheduleRaw = []; this.scheduleExists = false; this.currentScheduleId = null; this.currentScheduleStatus = null; this.scheduleError = error.message || 'Не удалось загрузить расписание'; this.syncSelectedWaiter() } finally { this.isLoadingSchedule = false; this.isMonthSwitching = false } },
+    async loadSchedule({ isMonthSwitching = false, scheduleId = null } = {}) { this.scheduleError = ''; this.isLoadingSchedule = !isMonthSwitching; this.isMonthSwitching = isMonthSwitching; this.closeAssignPanel(); try { const schedule = await fetchScheduleForMonth({ monthDate:this.currentMonth,user:this.user,scheduleId }); this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []; this.scheduleExists = Boolean(schedule.scheduleExists); this.currentScheduleId = schedule.scheduleId || null; this.currentScheduleStatus = schedule.scheduleStatus || null; this.syncSelectedWaiter() } catch (error) { this.scheduleRaw = []; this.scheduleExists = false; this.currentScheduleId = null; this.currentScheduleStatus = null; this.scheduleError = error.message || 'Не удалось загрузить расписание'; this.syncSelectedWaiter() } finally { this.isLoadingSchedule = false; this.isMonthSwitching = false } },
     syncSelectedWaiter() { if (this.waiters.length === 0) { this.selectedWaiter = ''; return } if (this.waiters.some((item) => item.slot_position_key === this.selectedWaiter)) return; if (this.isWaiterView && this.currentUserAssignedWaiterKey) { this.selectedWaiter = this.currentUserAssignedWaiterKey; return } if (this.isWaiterView && this.pinnedWaiterKey) { const pinned = this.waiters.find((item) => item.slot_position_key === this.pinnedWaiterKey); if (pinned && this.canSelectWaiter(pinned)) { this.selectedWaiter = this.pinnedWaiterKey; return } } const firstAllowed = this.waiters.find((item) => this.canSelectWaiter(item)); this.selectedWaiter = firstAllowed?.slot_position_key || '' },
     selectWaiter(slotPositionKey) { if (!slotPositionKey) return; const waiter = this.waiters.find((item) => item.slot_position_key === slotPositionKey); if (waiter && !this.canSelectWaiter(waiter)) return; this.selectedWaiter = slotPositionKey; this.closeAssignPanel() },
-    getCurrentUserFullName() { const fullName = [this.user.first_name,this.user.last_name].filter(Boolean).join(' ').trim(); return fullName || this.user.username || 'Сотрудник' },
     getEmployeeOptionLabel(employee) { const fullName = [employee.first_name,employee.last_name].filter(Boolean).join(' ').trim(); const label = fullName || employee.username || `Сотрудник ${employee.id}`; const role = this.getGradeLabel(employee.role); return role ? `${label} · ${role}` : label },
     isCurrentUserAssignment(item) { const users = [normalizeIdentity(this.user.id),normalizeIdentity(this.user.username),normalizeIdentity(this.user.email)].filter(Boolean); const assignment = [normalizeIdentity(item.employee_id),normalizeIdentity(item.employee_key),normalizeIdentity(item.assigned_employee_id),normalizeIdentity(item.assigned_employee_username)].filter(Boolean); return assignment.some((identity) => users.includes(identity)) },
-    notifyManagerAboutClaim(waiter) { pushProfileNotification({ venue:this.currentVenueId,audience:'manager',type:'slot-claim',title:'Новое закрепление',message:`${this.getCurrentUserFullName()} закрепился за местом ${waiter.waiter_num || waiter.label}.` }) },
-    notifyManagerAboutAssignment(employee,waiter) { pushProfileNotification({ venue:this.currentVenueId,audience:'manager',type:'slot-assign',title:'Менеджер закрепил сотрудника',message:`${this.getEmployeeOptionLabel(employee)} закреплен за местом ${waiter.waiter_num || waiter.label}.` }) },
-    async handleClaimSelectedWaiter() { if (!this.canClaimSelectedWaiter || !this.selectedWaiterInfo) return; this.isClaimingSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await claimScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id }); this.notifyManagerAboutClaim(this.selectedWaiterInfo); await this.loadSchedule({ scheduleId:this.currentScheduleId }); this.scheduleNotice = 'Вы успешно закрепились за выбранным местом.' } catch (error) { this.scheduleError = error.message || 'Не удалось закрепиться за местом' } finally { this.isClaimingSlot = false } },
-    async handleAssignSelectedWaiter() { if (!this.selectedWaiterInfo || !this.selectedEmployeeToAssign) return; this.isAssigningSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await assignScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id, employeeId:Number(this.selectedEmployeeToAssign) }); const employee = this.assignableEmployees.find((item) => Number(item.id) === Number(this.selectedEmployeeToAssign)); if (employee) this.notifyManagerAboutAssignment(employee,this.selectedWaiterInfo); await this.loadSchedule({ scheduleId:this.currentScheduleId }); this.scheduleNotice = 'Сотрудник закреплен за выбранным местом.' } catch (error) { this.scheduleError = error.message || 'Не удалось закрепить сотрудника' } finally { this.isAssigningSlot = false } },
-    async handleUnassignSelectedWaiter() { if (!this.canUnassignSelectedWaiter || !this.selectedWaiterInfo) return; this.isUnassigningSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await unassignScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); this.scheduleNotice = 'Сотрудник откреплен от выбранного места.' } catch (error) { this.scheduleError = error.message || 'Не удалось открепить сотрудника' } finally { this.isUnassigningSlot = false } },
-    async handleCreateSchedule() { if (this.isGeneratingSchedule) return; this.isGeneratingSchedule = true; this.scheduleError = ''; this.scheduleNotice = ''; try { const response = await generateSchedule({ user:this.user,monthDate:this.currentMonth }); const scheduleId = response?.schedule_id || response?.scheduleId || null; const slotsCount = Number(response?.slots_count); const entriesCount = Number(response?.entries_count); if (scheduleId) await this.loadSchedule({ scheduleId }); else await this.loadSchedule(); const parts = ['Черновик расписания создан']; if (Number.isFinite(slotsCount)) parts.push(`слотов: ${slotsCount}`); if (Number.isFinite(entriesCount)) parts.push(`назначений: ${entriesCount}`); this.scheduleNotice = parts.join(', ') + '.' } catch (error) { this.scheduleError = error.message || 'Не удалось создать расписание' } finally { this.isGeneratingSchedule = false } },
-    async handlePublishSchedule() { if (this.isPublishingSchedule || !this.currentScheduleId) return; this.isPublishingSchedule = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await publishSchedule({ scheduleId:this.currentScheduleId,monthDate:this.currentMonth }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); this.scheduleNotice = 'Расписание опубликовано.' } catch (error) { this.scheduleError = error.message || 'Не удалось опубликовать расписание' } finally { this.isPublishingSchedule = false } },
+    async handleClaimSelectedWaiter() { if (!this.canClaimSelectedWaiter || !this.selectedWaiterInfo) return; this.isClaimingSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await claimScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); window.dispatchEvent(new CustomEvent('notifications:refresh')); this.scheduleNotice = 'Запрос на закрепление отправлен.' } catch (error) { this.scheduleError = error.message || 'Не удалось закрепиться за местом' } finally { this.isClaimingSlot = false } },
+    async handleAssignSelectedWaiter() { if (!this.selectedWaiterInfo || !this.selectedEmployeeToAssign) return; this.isAssigningSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await assignScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id, employeeId:Number(this.selectedEmployeeToAssign) }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); window.dispatchEvent(new CustomEvent('notifications:refresh')); this.scheduleNotice = 'Сотрудник закреплен за выбранным местом.' } catch (error) { this.scheduleError = error.message || 'Не удалось закрепить сотрудника' } finally { this.isAssigningSlot = false } },
+    async handleUnassignSelectedWaiter() { if (!this.canUnassignSelectedWaiter || !this.selectedWaiterInfo) return; this.isUnassigningSlot = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await unassignScheduleSlot({ slotId:this.selectedWaiterInfo.slot_id }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); window.dispatchEvent(new CustomEvent('notifications:refresh')); this.scheduleNotice = 'Сотрудник откреплен от выбранного места.' } catch (error) { this.scheduleError = error.message || 'Не удалось открепить сотрудника' } finally { this.isUnassigningSlot = false } },
+    async handleCreateSchedule() { if (this.isGeneratingSchedule) return; this.isGeneratingSchedule = true; this.scheduleError = ''; this.scheduleNotice = ''; try { const response = await generateSchedule({ user:this.user,monthDate:this.currentMonth }); const scheduleId = response?.schedule_id || response?.scheduleId || null; const slotsCount = Number(response?.slots_count); const entriesCount = Number(response?.entries_count); if (scheduleId) await this.loadSchedule({ scheduleId }); else await this.loadSchedule(); window.dispatchEvent(new CustomEvent('notifications:refresh')); const parts = ['Черновик расписания создан']; if (Number.isFinite(slotsCount)) parts.push(`слотов: ${slotsCount}`); if (Number.isFinite(entriesCount)) parts.push(`назначений: ${entriesCount}`); this.scheduleNotice = parts.join(', ') + '.' } catch (error) { this.scheduleError = error.message || 'Не удалось создать расписание' } finally { this.isGeneratingSchedule = false } },
+    async handlePublishSchedule() { if (this.isPublishingSchedule || !this.currentScheduleId) return; this.isPublishingSchedule = true; this.scheduleError = ''; this.scheduleNotice = ''; try { await publishSchedule({ scheduleId:this.currentScheduleId,monthDate:this.currentMonth }); await this.loadSchedule({ scheduleId:this.currentScheduleId }); window.dispatchEvent(new CustomEvent('notifications:refresh')); this.scheduleNotice = 'Расписание опубликовано.' } catch (error) { this.scheduleError = error.message || 'Не удалось опубликовать расписание' } finally { this.isPublishingSchedule = false } },
+    async handleNotificationsUpdated() { await this.loadSchedule({ scheduleId:this.currentScheduleId }) },
     buildCalendarDay(date,isCurrentMonth) { const key = this.formatDateKey(date); const today = new Date(); return { key,date,isCurrentMonth,isToday:date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate(),shift:this.selectedWaiterScheduleMap[key] || null,hasOpenSlots:Boolean(this.openSlotsMap[key]) } },
     formatDateKey(date) { const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2,'0'); const day = String(date.getDate()).padStart(2,'0'); return `${year}-${month}-${day}` },
     getFallbackEmployeeLabel(item) { if (item.waiter_num || item.waiter_num === 0) return `Официант ${item.waiter_num}`; return item.employee_key ? `Сотрудник ${item.employee_key}` : 'Сотрудник' },
