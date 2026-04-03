@@ -2,6 +2,7 @@
 
 const DEFAULT_TITLE = '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435'
 const ERROR_ID = '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f'
+const PUSH_ICON_URL = '/S_height.png'
 
 const asArray = (payload) => {
   if (Array.isArray(payload)) return payload
@@ -157,4 +158,41 @@ export const rejectNotification = async (notificationId) => {
   if (!notificationId) throw new Error(ERROR_ID)
   const response = await api.post(`/notifications/${notificationId}/reject/`)
   return response.data
+}
+
+export const supportsSystemNotifications = () =>
+  typeof window !== 'undefined' &&
+  'Notification' in window &&
+  'serviceWorker' in navigator
+
+export const getSystemNotificationPermission = () => {
+  if (!supportsSystemNotifications()) return 'unsupported'
+  return window.Notification.permission || 'default'
+}
+
+export const requestSystemNotificationPermission = async () => {
+  if (!supportsSystemNotifications()) return 'unsupported'
+  return window.Notification.requestPermission()
+}
+
+export const showSystemNotification = async (notification) => {
+  if (!notification || getSystemNotificationPermission() !== 'granted') {
+    return false
+  }
+
+  const registration = await navigator.serviceWorker.ready
+  await registration.showNotification(notification.title || DEFAULT_TITLE, {
+    body: notification.message || '',
+    icon: PUSH_ICON_URL,
+    badge: PUSH_ICON_URL,
+    tag: notification.id ? `notification-${notification.id}` : undefined,
+    renotify: false,
+    data: {
+      url: '/',
+      notificationId: notification.id || null,
+      scheduleId: notification.schedule_id || null
+    }
+  })
+
+  return true
 }

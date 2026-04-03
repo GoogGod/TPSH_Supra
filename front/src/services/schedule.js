@@ -301,6 +301,15 @@ const extractScheduleItems = (payload) => {
       }
 
       if (Array.isArray(slot.entries)) {
+        if (slot.entries.length === 0) {
+          return [
+            {
+              ...slot,
+              __slot_placeholder: true
+            }
+          ]
+        }
+
         return slot.entries.map((entry) => {
           if (!isObject(entry)) {
             return entry
@@ -318,7 +327,12 @@ const extractScheduleItems = (payload) => {
         })
       }
 
-      return []
+      return [
+        {
+          ...slot,
+          __slot_placeholder: true
+        }
+      ]
     })
 
     if (slotEntries.length > 0) {
@@ -437,13 +451,14 @@ const normalizeScheduleEntry = (item) => {
       ? rawIsWorking
       : String(rawIsWorking || '').toLowerCase() === 'true'
   const isWorking = isWorkingValue && !INACTIVE_STATUSES.has(status)
+  const isSlotPlaceholder = item.__slot_placeholder === true
 
-  if (!date) {
+  if (!date && !isSlotPlaceholder) {
     return null
   }
 
   return {
-    date,
+    date: date || null,
     entry_id: firstDefined(item.entry_id, item.id, null),
     slot_id: firstDefined(item.slot_id, shift.id, item.slot?.id, item.id, null),
     slot_position_key: String(firstDefined(item.slot_position_key, item.waiter_num, item.slot_id, employeeKey, '')),
@@ -470,7 +485,8 @@ const normalizeScheduleEntry = (item) => {
     employee_role: firstDefined(item.employee_role, employee.role, null),
     employee_role_display: firstDefined(item.employee_role_display, employee.role_display, null),
     employee_pro: item.employee_pro === true,
-    employee_noob: item.employee_noob === true
+    employee_noob: item.employee_noob === true,
+    is_slot_placeholder: isSlotPlaceholder
   }
 }
 

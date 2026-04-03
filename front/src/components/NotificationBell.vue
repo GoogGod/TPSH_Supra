@@ -27,6 +27,15 @@
           </div>
           <div class="notification-head-actions">
             <button
+              v-if="canEnablePush"
+              class="notification-head-action"
+              type="button"
+              :disabled="isRequestingPushPermission"
+              @click="handleEnablePush"
+            >
+              {{ isRequestingPushPermission ? t.enablingPush : t.enablePush }}
+            </button>
+            <button
               v-if="notifications.length > 0"
               class="notification-head-action"
               type="button"
@@ -49,10 +58,13 @@
         <div v-if="error" class="notification-state is-error">
           {{ error }}
         </div>
-        <div v-else-if="isLoading && notifications.length === 0" class="notification-state">
+        <div v-if="!error && pushStateLabel" class="notification-state">
+          {{ pushStateLabel }}
+        </div>
+        <div v-if="!error && isLoading && notifications.length === 0" class="notification-state">
           {{ t.loading }}
         </div>
-        <div v-else-if="notifications.length === 0" class="notification-state">
+        <div v-else-if="!error && notifications.length === 0" class="notification-state">
           {{ t.empty }}
         </div>
         <div v-else class="notification-list">
@@ -118,16 +130,21 @@ import {
   confirmNotification,
   fetchNotifications,
   fetchUnreadNotificationsCount,
+  getSystemNotificationPermission,
   markAllNotificationsAsRead,
   markNotificationAsRead,
   notificationCanConfirm,
   notificationCanReject,
   notificationNeedsDecision,
-  rejectNotification
+  rejectNotification,
+  requestSystemNotificationPermission,
+  showSystemNotification,
+  supportsSystemNotifications
 } from '../services/notifications'
 
 const POLL_INTERVAL_MS = 15000
 const HIDDEN_NOTIFICATIONS_STORAGE_KEY = 'hidden_notification_ids'
+const SHOWN_SYSTEM_NOTIFICATION_IDS_KEY = 'shown_system_notification_ids'
 
 const readHiddenNotificationIds = () => {
   try {
@@ -138,10 +155,23 @@ const readHiddenNotificationIds = () => {
   }
 }
 
+const readShownSystemNotificationIds = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SHOWN_SYSTEM_NOTIFICATION_IDS_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter(Boolean) : []
+  } catch (error) {
+    return []
+  }
+}
+
 const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   events: '\u0421\u043e\u0431\u044b\u0442\u0438\u044f',
   notifications: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
+  enablePush: '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c push',
+  enablingPush: '\u0412\u043a\u043b\u044e\u0447\u0430\u0435\u043c...',
+  pushEnabled: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b',
+  pushBlocked: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b',
   clear: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c',
   reading: '\u0427\u0438\u0442\u0430\u0435\u043c...',
   readAll: '\u041f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0432\u0441\u0435',
@@ -166,16 +196,27 @@ export default {
       isOpen: false,
       isLoading: false,
       isMarkingAll: false,
+      isRequestingPushPermission: false,
       actionLoadingId: null,
       error: '',
       unreadCount: 0,
       notifications: [],
-      hiddenNotificationIds: readHiddenNotificationIds()
+      hiddenNotificationIds: readHiddenNotificationIds(),
+      shownSystemNotificationIds: readShownSystemNotificationIds(),
+      systemNotificationPermission: getSystemNotificationPermission()
     }
   },
   computed: {
     badgeLabel() {
       return this.unreadCount > 99 ? '99+' : String(this.unreadCount)
+    },
+    canEnablePush() {
+      return supportsSystemNotifications() && this.systemNotificationPermission === 'default'
+    },
+    pushStateLabel() {
+      if (this.systemNotificationPermission === 'granted') return this.t.pushEnabled
+      if (this.systemNotificationPermission === 'denied') return this.t.pushBlocked
+      return ''
     }
   },
   async mounted() {
@@ -183,7 +224,7 @@ export default {
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     window.addEventListener('focus', this.handleWindowFocus)
     window.addEventListener('notifications:refresh', this.handleExternalRefresh)
-    await this.refreshUnreadCount()
+    await this.bootstrapNotifications()
     this.pollTimer = window.setInterval(() => {
       this.refreshNotifications({ silent: true })
     }, POLL_INTERVAL_MS)
@@ -222,6 +263,62 @@ export default {
         return String(value)
       }
     },
+    persistShownSystemNotificationIds() {
+      try {
+        const normalized = this.shownSystemNotificationIds.slice(-200)
+        localStorage.setItem(SHOWN_SYSTEM_NOTIFICATION_IDS_KEY, JSON.stringify(normalized))
+      } catch (error) {
+        // ignore storage write issues
+      }
+    },
+    markSystemNotificationsAsSeen(notifications) {
+      const nextIds = notifications.map((item) => item.id).filter(Boolean)
+      this.shownSystemNotificationIds = Array.from(new Set([
+        ...this.shownSystemNotificationIds,
+        ...nextIds
+      ])).slice(-200)
+      this.persistShownSystemNotificationIds()
+    },
+    async bootstrapNotifications() {
+      try {
+        const notifications = this.applyHiddenNotifications(await fetchNotifications())
+        this.notifications = this.isOpen ? notifications : this.notifications
+        this.unreadCount = notifications.filter((item) => !item.read).length
+        this.markSystemNotificationsAsSeen(notifications)
+      } catch (error) {
+        await this.refreshUnreadCount()
+      }
+    },
+    async syncNotifications({ silent = false, showSystem = true } = {}) {
+      if (!silent) this.isLoading = true
+      this.error = ''
+
+      try {
+        const notifications = this.applyHiddenNotifications(await fetchNotifications())
+        this.notifications = this.isOpen ? notifications : this.notifications
+        this.unreadCount = notifications.filter((item) => !item.read).length
+
+        if (showSystem && this.systemNotificationPermission === 'granted') {
+          const hiddenIds = new Set(this.hiddenNotificationIds)
+          const shownIds = new Set(this.shownSystemNotificationIds)
+          const freshNotifications = notifications.filter((item) => !item.read && item.id && !hiddenIds.has(item.id) && !shownIds.has(item.id))
+
+          for (const notification of freshNotifications) {
+            try {
+              await showSystemNotification(notification)
+            } catch (error) {
+              // ignore notification delivery issues
+            }
+          }
+        }
+
+        this.markSystemNotificationsAsSeen(notifications)
+      } catch (error) {
+        this.error = error?.message || this.t.loadError
+      } finally {
+        this.isLoading = false
+      }
+    },
     async refreshUnreadCount() {
       try {
         if (this.hiddenNotificationIds.length > 0) {
@@ -238,28 +335,31 @@ export default {
       }
     },
     async refreshNotifications({ silent = false } = {}) {
-      await this.refreshUnreadCount()
-      if (this.isOpen) {
-        await this.loadNotifications({ silent })
-      }
+      await this.syncNotifications({ silent, showSystem: true })
     },
     async loadNotifications({ silent = false } = {}) {
-      if (!silent) this.isLoading = true
-      this.error = ''
-
-      try {
-        this.notifications = this.applyHiddenNotifications(await fetchNotifications())
-        this.unreadCount = this.notifications.filter((item) => !item.read).length
-      } catch (error) {
-        this.error = error?.message || this.t.loadError
-      } finally {
-        this.isLoading = false
-      }
+      await this.syncNotifications({ silent, showSystem: false })
     },
     async togglePanel() {
       this.isOpen = !this.isOpen
       if (this.isOpen) {
         await this.refreshNotifications()
+      }
+    },
+    async handleEnablePush() {
+      if (!this.canEnablePush || this.isRequestingPushPermission) return
+      this.isRequestingPushPermission = true
+      this.error = ''
+
+      try {
+        this.systemNotificationPermission = await requestSystemNotificationPermission()
+        if (this.systemNotificationPermission === 'granted') {
+          await this.syncNotifications({ silent: true, showSystem: false })
+        }
+      } catch (error) {
+        this.error = error?.message || this.t.loadError
+      } finally {
+        this.isRequestingPushPermission = false
       }
     },
     handleOutsideClick(event) {
