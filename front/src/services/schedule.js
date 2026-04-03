@@ -875,6 +875,36 @@ export const publishSchedule = async ({ scheduleId, monthDate = new Date() } = {
   }
 }
 
+export const unpublishSchedule = async ({ scheduleId, monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для перевода в черновик')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (monthData && monthData.scheduleId === scheduleId) {
+      saved[range.monthKey] = {
+        ...monthData,
+        status: 'draft'
+      }
+
+      localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    }
+
+    return { schedule_id: scheduleId, status: 'draft' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/monthly/${scheduleId}/unpublish/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось перевести расписание в черновик'))
+  }
+}
+
 export const claimScheduleSlot = async ({ slotId } = {}) => {
   if (!slotId) {
     throw new Error('Не удалось определить слот для закрепления')

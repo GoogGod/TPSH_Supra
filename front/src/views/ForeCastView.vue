@@ -81,6 +81,7 @@
               :disabled="!canSelectWaiter(waiter)"
               @click="selectWaiter(waiter.slot_position_key)"
             >
+              <span class="waiter-button-dot" :style="{ backgroundColor: waiter.color }"></span>
               <span class="waiter-button-name">{{ waiter.label }}</span>
               <span class="waiter-button-meta">{{ getWaiterMeta(waiter) }}</span>
             </button>
@@ -120,8 +121,8 @@
           </div>
         </div>
 
-        <div v-if="canPublishCurrentSchedule" class="bottom-actions bottom-actions-single">
-          <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
+        <div v-if="canToggleScheduleStatus" class="bottom-actions bottom-actions-single">
+          <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handleToggleScheduleStatus">{{ scheduleToggleButtonLabel }}</button>
         </div>
 
         <div v-if="selectedWaiterInfo" class="slot-actions-card slot-actions-card-bottom">
@@ -192,10 +193,6 @@
                     <strong>{{ dayEditorEntry.is_working ? getShiftLabel(dayEditorEntry.shift_type) : 'Выходной день' }}</strong>
                     <p>{{ dayEditorEntry.work_start && dayEditorEntry.work_end ? `${dayEditorEntry.work_start} - ${dayEditorEntry.work_end}` : 'Без времени смены' }}</p>
                   </div>
-                  <label class="schedule-editor-check">
-                    <input v-model="dayEditorEntry.is_working" type="checkbox" @change="handleDayEditorWorkingToggle" />
-                    <span>Рабочий день</span>
-                  </label>
                 </div>
 
                 <div class="schedule-editor-grid">
@@ -204,13 +201,9 @@
                     <ThemedSelect
                       v-model="dayEditorEntry.shift_type"
                       :options="shiftTypeOptions"
-                      :disabled="!dayEditorEntry.is_working"
+                      @change="handleDayEditorShiftTypeChange"
                       placeholder="Тип смены"
                     />
-                  </label>
-                  <label class="schedule-editor-field">
-                    <span>Нужно официантов</span>
-                    <input v-model.number="dayEditorEntry.waiters_needed" type="number" min="0" step="1" :disabled="!dayEditorEntry.is_working" />
                   </label>
                   <label class="schedule-editor-field">
                     <span>Начало</span>
@@ -219,10 +212,6 @@
                   <label class="schedule-editor-field">
                     <span>Конец</span>
                     <input v-model="dayEditorEntry.work_end" type="time" :disabled="!dayEditorEntry.is_working" @change="handleDayEditorTimeChange" />
-                  </label>
-                  <label class="schedule-editor-field schedule-editor-field-wide">
-                    <span>Часы</span>
-                    <input v-model.number="dayEditorEntry.work_hours" type="number" min="0" step="0.5" :disabled="!dayEditorEntry.is_working" />
                   </label>
                 </div>
               </div>
@@ -247,7 +236,7 @@ import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, updateScheduleEntriesBulk } from '../services/schedule'
+import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
@@ -331,7 +320,12 @@ export default {
     isWaiterView() { return !this.canManageSchedule },
     hasSchedule() { return this.scheduleExists },
     isDraftSchedule() { return this.currentScheduleStatus === 'draft' },
-    canPublishCurrentSchedule() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && this.isDraftSchedule },
+    isPublishedSchedule() { return this.currentScheduleStatus === 'published' },
+    canToggleScheduleStatus() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && (this.isDraftSchedule || this.isPublishedSchedule) },
+    scheduleToggleButtonLabel() {
+      if (this.isPublishingSchedule) return this.isDraftSchedule ? 'Публикуем...' : 'Переводим в черновик...'
+      return this.isDraftSchedule ? 'Опубликовать' : 'Редактировать'
+    },
     roleHint() { return this.canManageSchedule ? (this.isDraftSchedule ? 'Черновик открыт: выберите место, поправьте смены и затем опубликуйте расписание.' : 'Выберите место и управляйте закреплениями сотрудников.') : 'Выберите место и закрепитесь за ним. Официант может быть закреплен только за одним местом.' },
     selectorDescription() { return this.waiters.length === 0 ? 'Кнопки появятся, когда в расписании будут доступные места.' : this.canManageSchedule ? 'Менеджер и админ могут закреплять сотрудников, снимать их и редактировать черновик по выбранному месту.' : 'Доступны только места вашей категории. Закрепиться можно только за одним местом.' },
     workingSchedule() { return this.scheduleRaw.filter((item) => item.is_working === true && item.employee_key) },
@@ -557,11 +551,22 @@ export default {
       this.scheduleNotice = 'Изменения для выбранного дня сброшены.'
       this.scheduleError = ''
     },
-    handleDayEditorWorkingToggle() {
+    handleDayEditorShiftTypeChange(value) {
       const entry = this.dayEditorEntry
       if (!entry) return
-      if (!entry.is_working) { entry.shift_type = 'off'; entry.waiters_needed = 0; entry.work_hours = 0; return }
-      if (entry.shift_type === 'off') entry.shift_type = 'shift'
+      const shiftType = String(value || entry.shift_type || '').toLowerCase()
+      if (shiftType === 'off') {
+        entry.shift_type = 'off'
+        entry.is_working = false
+        entry.waiters_needed = 0
+        entry.work_start = ''
+        entry.work_end = ''
+        entry.work_hours = 0
+        return
+      }
+
+      entry.shift_type = shiftType || 'shift'
+      entry.is_working = true
       if (!entry.waiters_needed) entry.waiters_needed = 1
       this.updateEditableWorkHours(entry)
     },
@@ -685,18 +690,23 @@ export default {
         this.scheduleError = error.message || 'Не удалось создать расписание'
       } finally { this.isGeneratingSchedule = false }
     },
-    async handlePublishSchedule() {
-      if (this.isPublishingSchedule || !this.currentScheduleId) return
+    async handleToggleScheduleStatus() {
+      if (this.isPublishingSchedule || !this.currentScheduleId || !this.canToggleScheduleStatus) return
+      const wasDraft = this.isDraftSchedule
       this.isPublishingSchedule = true
       this.scheduleError = ''
       this.scheduleNotice = ''
       try {
-        await publishSchedule({ scheduleId: this.currentScheduleId, monthDate: this.currentMonth })
+        if (wasDraft) {
+          await publishSchedule({ scheduleId: this.currentScheduleId, monthDate: this.currentMonth })
+        } else {
+          await unpublishSchedule({ scheduleId: this.currentScheduleId, monthDate: this.currentMonth })
+        }
         await this.loadSchedule({ scheduleId: this.currentScheduleId })
         window.dispatchEvent(new CustomEvent('notifications:refresh'))
-        this.scheduleNotice = 'Расписание опубликовано.'
+        this.scheduleNotice = wasDraft ? 'Расписание опубликовано.' : 'Расписание переведено в черновик.'
       } catch (error) {
-        this.scheduleError = error.message || 'Не удалось опубликовать расписание'
+        this.scheduleError = error.message || (wasDraft ? 'Не удалось опубликовать расписание' : 'Не удалось перевести расписание в черновик')
       } finally { this.isPublishingSchedule = false }
     },
     async handleNotificationsUpdated() { await this.loadSchedule({ scheduleId: this.currentScheduleId }) },
