@@ -366,7 +366,13 @@ export default {
           if (!current.roleDisplay && item.employee_role_display) current.roleDisplay = item.employee_role_display
         }
       })
-      return Array.from(grouped.values()).sort((left, right) => (left.waiter_num ?? 0) - (right.waiter_num ?? 0))
+      return Array.from(grouped.values())
+        .sort((left, right) => (left.waiter_num ?? 0) - (right.waiter_num ?? 0))
+        .map((waiter, index) => ({
+          ...waiter,
+          displayNumber: Number(waiter.waiter_num) > 0 ? Number(waiter.waiter_num) : index + 1,
+          label: this.getWaiterDisplayLabel(waiter, index)
+        }))
     },
     selectedWaiterInfo() { return this.waiters.find((item) => item.slot_position_key === this.selectedWaiter) || null },
     pinnedWaiterKey() {
@@ -720,7 +726,7 @@ export default {
       this.scheduleError = ''
       this.scheduleNotice = ''
       try {
-        await addScheduleSlot({ scheduleId: this.currentScheduleId, grade: this.selectedSlotGrade, monthDate: this.currentMonth })
+        await addScheduleSlot({ scheduleId: this.currentScheduleId, employeeLevel: this.selectedSlotGrade, monthDate: this.currentMonth })
         await this.loadSchedule({ scheduleId: this.currentScheduleId })
         this.closeAddSlotModal()
         this.scheduleNotice = 'Новое место добавлено в черновик.'
@@ -756,10 +762,17 @@ export default {
     formatDateKey(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` },
     formatEntryDate(date) { return new Date(`${date}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) },
     getFallbackEmployeeLabel(item) { return item.waiter_num || item.waiter_num === 0 ? `Официант ${item.waiter_num}` : item.employee_key ? `Сотрудник ${item.employee_key}` : 'Сотрудник' },
+    getWaiterDisplayLabel(waiter, index = 0) {
+      if (waiter?.isClaimed) {
+        return waiter.assigned_employee_name || waiter.assigned_employee_username || waiter.label || `Официант ${index + 1}`
+      }
+
+      const displayNumber = Number(waiter?.waiter_num) > 0 ? Number(waiter.waiter_num) : index + 1
+      return `Официант ${displayNumber}`
+    },
     getWaiterMeta(waiter) {
       const role = this.getGradeLabel(waiter.grade) || waiter.roleDisplay || 'Без категории'
-      if (waiter.isClaimed) return `${role} · занято: ${waiter.assigned_employee_name || waiter.assigned_employee_username || 'сотрудник'}`
-      return `${role} · свободно`
+      return role
     },
     getGradeLabel(grade) { const normalized = String(grade || '').toLowerCase(); if (normalized === 'employee_noob') return 'Стажер'; if (normalized === 'employee_pro') return 'Опытный'; return '' },
     getShortageUnitLabel(value) {

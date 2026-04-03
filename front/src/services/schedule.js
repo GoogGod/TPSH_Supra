@@ -938,12 +938,12 @@ export const unpublishSchedule = async ({ scheduleId, monthDate = new Date() } =
   }
 }
 
-export const addScheduleSlot = async ({ scheduleId, grade, monthDate = new Date() } = {}) => {
+export const addScheduleSlot = async ({ scheduleId, employeeLevel, monthDate = new Date() } = {}) => {
   if (!scheduleId) {
     throw new Error('Не удалось определить расписание для добавления места')
   }
 
-  if (!grade) {
+  if (!employeeLevel) {
     throw new Error('Не выбрана категория официанта')
   }
 
@@ -965,7 +965,7 @@ export const addScheduleSlot = async ({ scheduleId, grade, monthDate = new Date(
       employee_key: `waiter-${nextWaiterNumber}`,
       employee_label: `Официант ${nextWaiterNumber}`,
       waiter_num: nextWaiterNumber,
-      grade
+      grade: employeeLevel
     }
 
     const nextEntries = [...monthData.entries, ...createMockEntriesForWaiter(monthDate, waiter)]
@@ -976,12 +976,12 @@ export const addScheduleSlot = async ({ scheduleId, grade, monthDate = new Date(
     }
 
     localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
-    return { schedule_id: scheduleId, grade, added_slots_count: 1 }
+    return { schedule_id: scheduleId, employee_level: employeeLevel, added_slots_count: 1 }
   }
 
   try {
     const response = await api.post(`/schedule/monthly/${scheduleId}/slots/add/`, {
-      grade
+      employee_level: employeeLevel
     })
     return response.data
   } catch (error) {
