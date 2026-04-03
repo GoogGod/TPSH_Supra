@@ -592,6 +592,19 @@ class WaiterScheduler:
             'waiter_patterns': pattern_info 
         }
         
+        waiter_pattern_var = vars_dict.get('waiter_pattern_var', {})
+        allowed_patterns = vars_dict.get('allowed_patterns', [(4, 2)])
+        
+        pattern_info = {}
+        for w in range(vars_dict['max_waiters']):
+            if solver.Value(vars_dict['is_active'][w]) == 1:
+                if w in waiter_pattern_var:
+                    p_idx = solver.Value(waiter_pattern_var[w])
+                    work, rest = allowed_patterns[p_idx]
+                    pattern_info[w+1] = f"{work}/{rest}"
+        
+        stats['waiter_patterns'] = pattern_info
+        
         return schedule_df, stats
     
     def _count_max_consecutive_shifts(self, group: pd.DataFrame) -> int:
@@ -676,6 +689,169 @@ class WaiterScheduler:
         for waiter_type, row in type_summary.iterrows():
             print(f"   {waiter_type:<12}: {int(row['work_hours']):>4} ч, {int(row['shift_type_code']):>3} смен")
     
+    def _create_model_with_strict_patterns(
+        self,
+        df: pd.DataFrame,
+        max_waiters: int,
+        min_hours: int,
+        patterns: list
+    ) -> Tuple[cp_model.CpModel, cp_model.CpSolver, Dict]: 
+        num_days = df['date'].nunique()
+        date_list = sorted(df['date'].unique())
+        date_to_idx = {d: i for i, d in enumerate(date_list)}
+        
+        model = cp_model.CpModel()
+        
+        # ПЕРЕМЕННЫЕ
+        
+        is_active = [model.NewBoolVar(f'active_{w}') for w in range(max_waiters)]
+        model.Add(sum(is_active) >= MIN_WAITERS_ABSOLUTE)
+        
+        shift = {}
+        for w in range(max_waiters):
+            for d in range(num_days):
+                for s in [1, 2, 3]:
+                    var = model.NewBoolVar(f'shift_w{w}_d{d}_s{s}')
+                    shift[(w, d, s)] = var
+                    model.Add(var <= is_active[w])
+        
+        waiter_hours = {}
+        for w in range(max_waiters):
+            expr = sum(
+                SHIFT_TYPES['full']['hours'] * shift[(w, d, 1)] +
+                SHIFT_TYPES['morning']['hours'] * shift[(w, d, 2)] +
+                SHIFT_TYPES['evening']['hours'] * shift[(w, d, 3)]
+                for d in range(num_days)
+            )
+            waiter_hours[w] = model.NewIntVar(0, num_days * 13, f'hours_w{w}')
+            model.Add(waiter_hours[w] == expr)
+        
+        waiter_shifts = {}
+        for w in range(max_waiters):
+            expr = sum(
+                shift[(w, d, s)]
+                for d in range(num_days)
+                for s in [1, 2, 3]
+            )
+            waiter_shifts[w] = model.NewIntVar(0, num_days, f'shifts_w{w}')
+            model.Add(waiter_shifts[w] == expr)
+        
+        # ГИБКИЕ ПАТТЕРНЫ СО СДВИГОМ (ключевое улучшение)
+        
+        waiter_pattern_var = {}
+        
+        for w in range(max_waiters):
+            pattern_bools = []
+            
+            for p_idx, (work_days, rest_days) in enumerate(patterns):
+                cycle = work_days + rest_days
+                
+                # Переменная: сдвиг начала цикла (0..cycle-1)
+                shift_var = model.NewIntVar(0, cycle - 1, f'shift_w{w}_p{p_idx}')
+                
+                for s in range(cycle):
+                    # Булева: этот официант использует паттерн p_idx со сдвигом s
+                    uses_pattern_shift = model.NewBoolVar(f'w{w}_p{p_idx}_s{s}')
+                    
+                    # Применяем паттерн со сдвигом
+                    for day in range(num_days):
+                        # Позиция в цикле со сдвигом
+                        pos_in_cycle = (day - s) % cycle
+                        is_work_day = pos_in_cycle < work_days
+                        
+                        if is_work_day:
+                            model.Add(sum(shift[(w, day, s_type)] for s_type in [1, 2, 3]) >= 1).OnlyEnforceIf(uses_pattern_shift)
+                        else:
+                            for s_type in [1, 2, 3]:
+                                model.Add(shift[(w, day, s_type)] == 0).OnlyEnforceIf(uses_pattern_shift)
+                    
+                    pattern_bools.append(uses_pattern_shift)
+            
+            # Ровно одна комбинация (паттерн + сдвиг) должна быть выбрана
+            model.Add(sum(pattern_bools) == 1)
+            
+            # Сохраняем для извлечения
+            waiter_pattern_var[w] = model.NewIntVar(0, len(patterns) * max(p[0]+p[1] for p in patterns) - 1, f'pattern_w{w}')
+        
+        # ОСНОВНЫЕ ОГРАНИЧЕНИЯ (покрытие, одна смена в день, и т.д.)
+        
+        for w in range(max_waiters):
+            for d in range(num_days):
+                model.Add(sum(shift[(w, d, s)] for s in [1, 2, 3]) <= 1)
+        
+        for day in date_list:
+            day_idx = date_to_idx[day]
+            day_data = df[df['date'] == day]
+            for hour in range(self.work_start, self.work_end):
+                hour_data = day_data[day_data['hour'] == hour]
+                if len(hour_data) == 0:
+                    continue
+                guests = hour_data['guests'].values[0]
+                if guests <= 0:
+                    continue
+                needed = int(np.ceil(guests / 7.5))
+                coverage = sum(
+                    shift[(w, day_idx, s)]
+                    for w in range(max_waiters)
+                    for s in [1, 2, 3]
+                    if get_shift_for_hour(s, hour)
+                )
+                model.Add(coverage >= needed)
+        
+        if self.best_effort:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= 0)
+        else:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= min_hours * is_active[w])
+        
+        # БАЛАНСИРОВКА
+        
+        max_imbalance = 5
+        for w1 in range(max_waiters):
+            for w2 in range(w1 + 1, max_waiters):
+                model.Add(waiter_shifts[w1] - waiter_shifts[w2] <= max_imbalance)
+                model.Add(waiter_shifts[w2] - waiter_shifts[w1] <= max_imbalance)
+        
+        total_guests = df['guests'].sum()
+        max_total_hours = int(np.ceil(total_guests / 3))
+        model.Add(sum(waiter_hours[w] for w in range(max_waiters)) <= max_total_hours)
+        
+        # ЦЕЛЕВАЯ ФУНКЦИЯ
+        
+        if self.best_effort:
+            objective = sum(is_active) * 100
+            
+            shift_imbalance = []
+            for w1 in range(max_waiters):
+                for w2 in range(w1 + 1, max_waiters):
+                    diff = model.NewIntVar(0, num_days, f'diff_w{w1}_w{w2}')
+                    model.Add(diff >= waiter_shifts[w1] - waiter_shifts[w2])
+                    model.Add(diff >= waiter_shifts[w2] - waiter_shifts[w1])
+                    shift_imbalance.append(diff)
+            
+            objective += sum(shift_imbalance) * 10
+            model.Minimize(objective)
+        else:
+            model.Minimize(sum(is_active))
+        
+        # СОЛВЕР
+        
+        solver = cp_model.CpSolver()
+        
+        return model, solver, {
+            'is_active': is_active,
+            'shift': shift,
+            'waiter_hours': waiter_hours,
+            'waiter_shifts': waiter_shifts,
+            'date_list': date_list,
+            'num_days': num_days,
+            'max_waiters': max_waiters,
+            'target_hours': min_hours if self.best_effort else None,
+            'waiter_pattern_var': waiter_pattern_var,
+            'allowed_patterns': patterns
+        }
+    
     def create_schedule(
         self,
         forecast_df: pd.DataFrame,
@@ -704,92 +880,91 @@ class WaiterScheduler:
         if self.verbose:
             print(f"Норма часов: {self.min_hours}ч/мес × {num_months:.1f}мес = {total_min_hours}ч")
         
-        max_waiters, suggested_min_hours, is_feasible = estimate_max_waiters(df, total_min_hours)
+        # ИТЕРАТИВНОЕ ПЛАНИРОВАНИЕ СО СТРОГИМИ ПАТТЕРНАМИ
         
-        actual_min_hours = total_min_hours
-        if total_min_hours > suggested_min_hours:
-            if self.verbose:
-                print(f"\nАдаптация нормы: {total_min_hours}ч → {suggested_min_hours}ч")
-            actual_min_hours = suggested_min_hours
+        # Начальное количество официантов
+        base_waiters = max(MIN_WAITERS_ABSOLUTE, int(np.ceil(df['guests'].max() / 10)))
         
-        base_timeout = 120.0 if num_days > 90 else 60.0
+        # Максимальное количество для итераций
+        max_waiters_limit = 15  # Не больше 15 официантов
+        
+        # Строгие паттерны
+        STRICT_PATTERNS = [
+            (4, 3),  # 4/3
+            (4, 2),  # 4/2
+            (3, 2),  # 3/2
+            (2, 2),  # 2/2
+        ]
+        
+        schedule_df = pd.DataFrame()
+        stats = {}
+        final_waiters = 0
         
         if self.verbose:
-            print(f"\nРешение (таймаут: {int(base_timeout)}с)...")
+            print(f"\nИтеративное планирование со строгими паттернами:")
+            print(f"   Паттерны: 4/3, 4/2, 3/2, 2/2")
+            print(f"   Старт: {base_waiters} официантов")
+            print(f"   Макс: {max_waiters_limit} официантов")
         
-        # Оцениваем минимальное количество официантов по нагрузке
-        total_guests = df['guests'].sum()
-        avg_guests_per_day = total_guests / num_days
-        
-        # Если средняя нагрузка > 20 гостей/час в рабочие часы, нужно больше официантов
-        if avg_guests_per_day / 13 > 1.5:  # 13 рабочих часов в день
-            # Добавляем 2-3 официанта к оценке
-            max_waiters = max(max_waiters, 9)  # Минимум 9 при высокой нагрузке
-            if verbose:
-                print(f"Высокая нагрузка: увеличиваем макс. официантов до {max_waiters}")
-        
-        model, solver, vars_dict = self._create_model(
-            df, max_waiters, actual_min_hours, best_effort=self.best_effort
-        )
-        solver.parameters.max_time_in_seconds = base_timeout
-        status = solver.Solve(model)
-        
-        if status == cp_model.INFEASIBLE and self.best_effort:
+        # Цикл попыток с увеличением штата
+        for num_waiters in range(base_waiters, max_waiters_limit + 1):
             if self.verbose:
-                print("INFEASIBLE — пробую упрощённую best effort модель...")
+                print(f"\nПопытка {num_waiters - base_waiters + 1}: {num_waiters} официантов...")
             
-            adaptation_factor = 0.2 if num_days > 90 else 0.3
-            fallback_min_hours = max(10, int(actual_min_hours * adaptation_factor))
+            # Оценка нормы часов для текущего количества
+            total_guests = df['guests'].sum()
+            total_waiter_hours = int(np.ceil(total_guests / AVG_CAPACITY))
+            suggested_min_hours = max(10, int(total_waiter_hours / num_waiters * 0.95))
+            actual_min_hours = min(total_min_hours, suggested_min_hours)
             
-            if self.verbose:
-                print(f"Повтор с нормой: {fallback_min_hours}ч (best effort)")
+            if self.verbose and num_waiters > base_waiters:
+                print(f"   Адаптация нормы: {total_min_hours}ч → {actual_min_hours}ч")
             
-            model, solver, vars_dict = self._create_model_relaxed(
-                df, max_waiters, fallback_min_hours, best_effort=True
+            # Создаём модель со строгими паттернами
+            model, solver, vars_dict = self._create_model_with_strict_patterns(
+                df, num_waiters, actual_min_hours, STRICT_PATTERNS
             )
-            solver.parameters.max_time_in_seconds = base_timeout * 1.5
-            actual_min_hours = fallback_min_hours
+            
+            # Таймаут увеличивается с каждой попыткой
+            timeout = 60.0 + (num_waiters - base_waiters) * 30.0
+            solver.parameters.max_time_in_seconds = timeout
+            solver.parameters.num_search_workers = 8
+            solver.parameters.cp_model_presolve = True
+            solver.parameters.linearization_level = 1
+            
             status = solver.Solve(model)
             
-            if status == cp_model.INFEASIBLE:
+            if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
                 if self.verbose:
-                    print("Всё ещё INFEASIBLE — пробую модель БЕЗ ограничений на часы...")
+                    print(f"   OPTIMAL: найдено решение с {num_waiters} официантами!")
                 
-                model, solver, vars_dict = self._create_model_relaxed(
-                    df, max_waiters, 0, best_effort=True
-                )
-                solver.parameters.max_time_in_seconds = base_timeout * 2
-                status = solver.Solve(model)
+                schedule_df, stats = self._extract_solution(solver, vars_dict, df)
+                final_waiters = num_waiters
+                break
+            else:
+                if self.verbose:
+                    print(f"   INFEASIBLE — пробуем с {num_waiters + 1} официантами...")
         
-        if status == cp_model.OPTIMAL:
+        # ОБРАБОТКА РЕЗУЛЬТАТА
+        
+        if schedule_df.empty:
             if self.verbose:
-                print("OPTIMAL: найдено оптимальное решение")
-        elif status == cp_model.FEASIBLE:
-            if self.verbose:
-                print("FEASIBLE: найдено допустимое решение")
-        elif status == cp_model.INFEASIBLE:
-            if self.verbose:
-                print("INFEASIBLE: не удалось найти решение даже в best effort")
+                print(f"\nНе удалось создать расписание даже с {max_waiters_limit} официантами")
                 print("Попробуйте:")
-                print("   • Увеличить период прогноза")
-                print("   • Проверить данные: нет ли аномально низкого прогноза")
-                print("   • Уменьшить норму часов или увеличить штат")
-            return pd.DataFrame(), {}
-        else:
-            if self.verbose:
-                print(f"{solver.StatusName(status)}")
+                print("   • Увеличить max_waiters_limit в коде")
+                print("   • Уменьшить норму часов")
+                print("   • Проверить данные прогноза")
             return pd.DataFrame(), {}
         
-        schedule_df, stats = self._extract_solution(solver, vars_dict, df)
+        # Обновляем статистику
+        stats['num_waiters'] = final_waiters
+        stats['best_effort'] = self.best_effort
+        stats['num_months'] = num_months
+        stats['min_hours_per_month'] = self.min_hours
+        stats['total_min_hours'] = total_min_hours
+        stats['strict_patterns'] = True
         
-        if self.best_effort and 'target_hours' in vars_dict:
-            stats['target_hours'] = vars_dict['target_hours']
-            stats['best_effort'] = True
-            stats['num_months'] = num_months
-            stats['min_hours_per_month'] = self.min_hours
-            stats['total_min_hours'] = total_min_hours
-        
-        if self.verbose and len(schedule_df) > 0:
+        if self.verbose:
             print("РЕЗУЛЬТАТЫ:")
             print(f"   Официантов: {stats['num_waiters']} (минимум {MIN_WAITERS_ABSOLUTE})")
             print(f"   Всего часов: {stats['total_hours']}")
@@ -798,7 +973,7 @@ class WaiterScheduler:
             self.print_waiter_summary(schedule_df, stats)
             
             if self.best_effort:
-                target = vars_dict.get('target_hours', actual_min_hours)
+                target = actual_min_hours
                 print(f"\nПериод: {num_months:.1f} месяцев")
                 print(f"Цель: {target}ч ({self.min_hours}ч/мес × {num_months:.1f}мес)")
                 print(f"   Фактически: {stats['avg_hours_per_waiter']:.1f}ч")
@@ -806,8 +981,6 @@ class WaiterScheduler:
                     print(f"   Достигнуто ≥80% цели")
                 else:
                     print(f"   Достигнуто {stats['avg_hours_per_waiter']/target*100:.0f}% цели")
-            else:
-                print(f"   Норма {actual_min_hours}ч: {'1' if stats['all_met_min'] else '0'}")
         
         return schedule_df, stats
 

@@ -252,5 +252,5 @@ if __name__ == '__main__':
         verbose=True,
         force_fresh_weather=True,
         from_date='2026-05-01',
-        to_date='2026-09-01'
+        to_date='2026-06-01'
     )
