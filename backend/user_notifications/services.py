@@ -72,6 +72,26 @@ def notify_manual_assignment(slot: WaiterSlot):
     )
 
 
+def notify_assignment_unassigned(slot: WaiterSlot, employee):
+    """
+    Уведомить сотрудника, что его сняли с позиции.
+    """
+    if employee is None:
+        return
+
+    Notification.objects.create(
+        recipient=employee,
+        notification_type=Notification.Type.ASSIGNMENT_UNASSIGNED,
+        title="Назначение отменено",
+        message=(
+            f"Назначение на позицию Официант {slot.waiter_num} отменено менеджером."
+        ),
+        is_read=False,
+        related_schedule=slot.schedule,
+        related_slot=slot,
+    )
+
+
 def notify_assignment_response(slot: WaiterSlot, accepted: bool):
     """
     Уведомить МЕНЕДЖЕРОВ venue: «Иванов И. подтвердил/отклонил назначение».

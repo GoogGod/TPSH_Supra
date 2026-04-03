@@ -76,3 +76,23 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
         ]
         read_only_fields = fields
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    venue_name = serializers.CharField(source="venue.name", read_only=True, default=None)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "role",
+            "venue",
+            "venue_name",
+            "is_active",
+        ]
+        read_only_fields = ["id", "venue_name"]

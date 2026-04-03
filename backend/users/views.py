@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
 
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
 from .permissions import IsManager
 from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
 from django.db import models
@@ -140,3 +140,40 @@ class UserDetailView(RetrieveUpdateAPIView):
             qs = qs.filter(venue=user.venue)
 
         return qs
+
+    def get_serializer_class(self):
+        if self.request.method in ("PATCH", "PUT"):
+            return UserUpdateSerializer
+        return UserSerializer
+
+    def _ensure_admin_for_write(self, request):
+        if request.method in ("PATCH", "PUT") and not request.user.is_admin_role:
+            return Response(
+                {"detail": "Только администратор может изменять данные сотрудника."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def update(self, request, *args, **kwargs):
+        denied = self._ensure_admin_for_write(request)
+        if denied:
+            return denied
+        response = super().update(request, *args, **kwargs)
+        user = self.get_object()
+        response.data = UserSerializer(user).data
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        denied = self._ensure_admin_for_write(request)
+        if denied:
+            return denied
+        response = super().partial_update(request, *args, **kwargs)
+        user = self.get_object()
+        response.data = UserSerializer(user).data
+        return response
+
+    def put(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Используйте PATCH для изменения данных сотрудника."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )

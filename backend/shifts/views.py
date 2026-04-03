@@ -29,6 +29,7 @@ from user_notifications.services import (
     notify_schedule_published,
     notify_slot_claimed,
     notify_manual_assignment,
+    notify_assignment_unassigned,
     notify_assignment_response,
 )
 
@@ -611,11 +612,13 @@ class UnassignSlotView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        prev_employee = slot.assigned_employee
         slot.assigned_employee = None
         slot.assignment_status = "open"
         slot.assigned_at = None
         slot.confirmed_at = None
         slot.save()
+        notify_assignment_unassigned(slot, prev_employee)
 
         return Response({"detail": "Сотрудник снят с позиции."})
 

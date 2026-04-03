@@ -430,7 +430,8 @@ const normalizeScheduleEntry = (item) => {
 
   return {
     date,
-    slot_id: firstDefined(item.slot_id, item.id, shift.id, null),
+    entry_id: firstDefined(item.entry_id, item.id, null),
+    slot_id: firstDefined(item.slot_id, shift.id, item.slot?.id, item.id, null),
     slot_position_key: String(firstDefined(item.slot_position_key, item.waiter_num, item.slot_id, employeeKey, '')),
     employee_key: employeeKey,
     employee_id: firstDefined(item.employee_id, employee.id, null),
@@ -449,8 +450,13 @@ const normalizeScheduleEntry = (item) => {
     work_start: workStart,
     work_end: workEnd,
     work_hours: Number.isFinite(numericHours) ? numericHours : null,
+    waiters_needed: firstDefined(item.waiters_needed, item.required_waiters, shift.waiters_needed, null),
     is_working: isWorking,
-    assignment_status: status || null
+    assignment_status: status || null,
+    employee_role: firstDefined(item.employee_role, employee.role, null),
+    employee_role_display: firstDefined(item.employee_role_display, employee.role_display, null),
+    employee_pro: item.employee_pro === true,
+    employee_noob: item.employee_noob === true
   }
 }
 
@@ -923,5 +929,33 @@ export const assignScheduleSlot = async ({ slotId, employeeId } = {}) => {
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось назначить сотрудника на место'))
+  }
+}
+
+
+export const updateScheduleEntriesBulk = async ({ scheduleId, updates } = {}) => {
+  if (!scheduleId) {
+    throw new Error('\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u043f\u0440\u0435\u0434\u0435\u043b\u0438\u0442\u044c \u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u0434\u043b\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f')
+  }
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    throw new Error('\u041d\u0435\u0442 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0439 \u0434\u043b\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f')
+  }
+
+  if (USE_MOCK_AUTH) {
+    return {
+      detail: '\u0427\u0435\u0440\u043d\u043e\u0432\u0438\u043a \u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u044f \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d.',
+      schedule_id: scheduleId,
+      updated_entries_count: updates.length
+    }
+  }
+
+  try {
+    const response = await api.patch(`/schedule/monthly/${scheduleId}/entries/bulk-update/`, {
+      updates
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0447\u0435\u0440\u043d\u043e\u0432\u0438\u043a \u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u044f'))
   }
 }

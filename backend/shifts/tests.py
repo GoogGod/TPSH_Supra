@@ -7,6 +7,7 @@ from rest_framework.test import APITestCase
 from shifts.models import MonthlySchedule, ScheduleEntry, Venue, WaiterSlot
 from shifts.services.csv_parser import parse_schedule_csv
 from shifts.views import GenerateMonthlyScheduleView
+from user_notifications.models import Notification
 from users.models import User
 
 
@@ -231,3 +232,32 @@ class ShiftsApiTests(APITestCase):
         self.assertEqual(metrics["lack_staff_peak"], 2)
         self.assertEqual(metrics["days_with_shortage"], 1)
         self.assertEqual(metrics["shortage_person_days"], 3)
+
+    def test_unassign_sends_notification_to_employee(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=4,
+            status=MonthlySchedule.Status.PUBLISHED,
+        )
+        slot = WaiterSlot.objects.create(
+            schedule=schedule,
+            waiter_num=1,
+            assigned_employee=self.employee_pro,
+            assignment_status=WaiterSlot.AssignmentStatus.CONFIRMED,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(reverse("slot-unassign", args=[slot.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        slot.refresh_from_db()
+        self.assertIsNone(slot.assigned_employee)
+        self.assertEqual(slot.assignment_status, WaiterSlot.AssignmentStatus.OPEN)
+
+        notification = Notification.objects.filter(
+            recipient=self.employee_pro,
+            notification_type=Notification.Type.ASSIGNMENT_UNASSIGNED,
+            related_slot=slot,
+        ).first()
+        self.assertIsNotNone(notification)

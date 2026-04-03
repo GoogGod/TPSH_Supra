@@ -2,8 +2,6 @@
 
 const DEFAULT_TITLE = '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435'
 const ERROR_ID = '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f'
-const ERROR_DELETE_ALL = '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f'
-const DELETE_ALL_NOTIFICATIONS_ENDPOINT = ''
 
 const asArray = (payload) => {
   if (Array.isArray(payload)) return payload
@@ -38,6 +36,10 @@ const buildNotificationMessage = (item, payload) =>
 
 const buildNotificationTitle = (item, payload) =>
   firstDefined(item?.title, item?.subject, item?.name, payload?.title, payload?.subject, DEFAULT_TITLE)
+
+const TYPE_CONFIRM_TOKENS = ['assign', 'assignment', 'slot_assign', 'slot-assign', 'slot_claim', 'slot-claim', 'claim', 'confirm']
+const TYPE_REJECT_TOKENS = ['claim', 'slot_claim', 'slot-claim', 'request', 'pending']
+const DECISION_STATUSES = ['pending', 'awaiting_review', 'awaiting_confirmation', 'requested']
 
 export const normalizeNotification = (item = {}) => {
   const payload = extractNotificationPayload(item)
@@ -104,10 +106,24 @@ const extractUnreadCount = (payload) => {
   return Number.isFinite(value) && value >= 0 ? value : 0
 }
 
-export const notificationNeedsDecision = (notification) => {
+export const notificationCanConfirm = (notification) => {
   if (!notification || notification.read) return false
-  if (notification.can_confirm || notification.can_reject || notification.action_required) return true
-  return ['pending', 'awaiting_review', 'awaiting_confirmation', 'requested'].includes(notification.status)
+  if (notification.can_confirm || notification.action_required) return true
+  if (DECISION_STATUSES.includes(notification.status)) return true
+  return TYPE_CONFIRM_TOKENS.some((token) => notification.type.includes(token))
+}
+
+export const notificationCanReject = (notification) => {
+  if (!notification || notification.read) return false
+  if (notification.can_reject) return true
+  return (
+    DECISION_STATUSES.includes(notification.status) &&
+    TYPE_REJECT_TOKENS.some((token) => notification.type.includes(token))
+  )
+}
+
+export const notificationNeedsDecision = (notification) => {
+  return notificationCanConfirm(notification) || notificationCanReject(notification)
 }
 
 export const fetchNotifications = async () => {
@@ -140,14 +156,5 @@ export const confirmNotification = async (notificationId) => {
 export const rejectNotification = async (notificationId) => {
   if (!notificationId) throw new Error(ERROR_ID)
   const response = await api.post(`/notifications/${notificationId}/reject/`)
-  return response.data
-}
-
-export const deleteAllNotifications = async () => {
-  if (!DELETE_ALL_NOTIFICATIONS_ENDPOINT) {
-    throw new Error(ERROR_DELETE_ALL)
-  }
-
-  const response = await api.delete(DELETE_ALL_NOTIFICATIONS_ENDPOINT)
   return response.data
 }

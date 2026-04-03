@@ -61,22 +61,15 @@
           <p><strong>Заведение:</strong> {{ currentVenueLabel }}</p>
         </div>
 
-        <section v-if="currentUserRole === 'admin'" class="data-upload-card">
-          <div class="data-upload-head">
-            <div>
-              <p class="data-upload-subtitle">Forecast</p>
-              <h2 class="data-upload-title">Загрузка фактических данных</h2>
-            </div>
-          </div>
-          <p class="data-upload-copy">
-            Загрузите JSON или CSV с историческими данными. После отправки записи попадут в БД и смогут использоваться модулем прогнозирования.
-          </p>
-          <button class="wide-button" @click="openUploadDataModal">
+        <div class="manager-actions">
+          <button v-if="currentUserRole === 'admin'" class="wide-button" @click="openUploadDataModal">
             Загрузить данные
           </button>
-        </section>
 
-        <div class="manager-actions">
+          <button v-if="currentUserRole === 'admin'" class="wide-button secondary" @click="openCreateVenueModal">
+            Создать заведение
+          </button>
+
           <button class="wide-button secondary" @click="openEmployeesModal">
             Просмотр сотрудников
           </button>
@@ -94,7 +87,7 @@
 
     <transition name="modal-fade">
       <div v-if="showEmployeesModal" class="modal-overlay" @click.self="closeEmployeesModal">
-        <div class="modal-card">
+        <div class="modal-card employees-modal-card">
           <div class="modal-header">
             <div>
               <p class="modal-subtitle">Команда</p>
@@ -159,10 +152,98 @@
                   <p>{{ employee.email || 'Email не указан' }}</p>
                   <p>{{ employee.phone || 'Телефон не указан' }}</p>
                   <p>Заведение: {{ getVenueLabel(employee) }}</p>
+                  <div v-if="canAdminManageEmployee(employee)" class="employee-card-actions">
+                    <button class="employee-manage-button" type="button" @click="openManageEmployeeModal(employee)">
+                      Управление
+                    </button>
+                  </div>
                 </article>
               </div>
             </section>
           </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showManageEmployeeModal" class="modal-overlay" @click.self="closeManageEmployeeModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Admin</p>
+              <h2 class="modal-title">Управление сотрудником</h2>
+            </div>
+            <button class="modal-close" @click="closeManageEmployeeModal">×</button>
+          </div>
+
+          <form class="role-form" @submit.prevent="submitManageEmployee">
+            <div v-if="manageEmployeeError" class="form-alert error">
+              {{ manageEmployeeError }}
+            </div>
+
+            <div v-if="manageEmployeeSuccess" class="form-alert success">
+              {{ manageEmployeeSuccess }}
+            </div>
+
+            <div v-if="isLoadingManagedEmployee" class="form-alert success">
+              Загружаем данные сотрудника...
+            </div>
+
+            <div v-else class="form-grid">
+              <label class="form-field">
+                <span>Username *</span>
+                <input v-model.trim="manageEmployeeForm.username" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Email *</span>
+                <input v-model.trim="manageEmployeeForm.email" type="email" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Имя *</span>
+                <input v-model.trim="manageEmployeeForm.first_name" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Фамилия *</span>
+                <input v-model.trim="manageEmployeeForm.last_name" type="text" required :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Телефон</span>
+                <input v-model.trim="manageEmployeeForm.phone" type="tel" :disabled="isSavingManagedEmployee" />
+              </label>
+
+              <label class="form-field">
+                <span>Роль *</span>
+                <ThemedSelect
+                  v-model="manageEmployeeForm.role"
+                  :options="availableRoleOptions"
+                  :disabled="isSavingManagedEmployee"
+                />
+              </label>
+
+              <label class="form-field form-field-full">
+                <span>Заведение</span>
+                <ThemedSelect
+                  v-model="manageEmployeeForm.venue"
+                  :options="manageVenueOptions"
+                  :disabled="isSavingManagedEmployee"
+                  placeholder="Без заведения"
+                />
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="wide-button secondary" :disabled="isSavingManagedEmployee || isLoadingManagedEmployee" @click="closeManageEmployeeModal">
+                Отмена
+              </button>
+              <button type="submit" class="wide-button" :disabled="isSavingManagedEmployee || isLoadingManagedEmployee || !manageEmployeeForm.id">
+                {{ isSavingManagedEmployee ? 'Сохраняем...' : 'Сохранить изменения' }}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </transition>
@@ -283,15 +364,11 @@
 
               <label class="form-field">
                 <span>Роль *</span>
-                <select v-model="createRoleForm.role" :disabled="isCreatingRole">
-                  <option
-                    v-for="option in availableRoleOptions"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="createRoleForm.role"
+                  :options="availableRoleOptions"
+                  :disabled="isCreatingRole"
+                />
               </label>
 
               <label
@@ -311,16 +388,12 @@
                 class="form-field form-field-full"
               >
                 <span>Заведение</span>
-                <select v-model="createRoleForm.venue" :disabled="isCreatingRole">
-                  <option disabled value="">Выберите ресторан</option>
-                  <option
-                    v-for="venue in venues"
-                    :key="venue.id"
-                    :value="venue.id"
-                  >
-                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="createRoleForm.venue"
+                  :options="venueOptions"
+                  :disabled="isCreatingRole"
+                  placeholder="Выберите ресторан"
+                />
               </label>
             </div>
 
@@ -375,24 +448,16 @@
 
               <label class="form-field form-field-full">
                 <span>Заведение по умолчанию</span>
-                <select v-model="forecastUploadVenueId" :disabled="isUploadingForecastData">
-                  <option value="">Из файла или не указывать</option>
-                  <option
-                    v-for="venue in venues"
-                    :key="`forecast-venue-${venue.id}`"
-                    :value="venue.id"
-                  >
-                    {{ venue.venue_name || venue.name || `Заведение #${venue.id}` }}
-                  </option>
-                </select>
+                <ThemedSelect
+                  v-model="forecastUploadVenueId"
+                  :options="forecastVenueOptions"
+                  :disabled="isUploadingForecastData"
+                  placeholder="Из файла или не указывать"
+                />
               </label>
             </div>
 
-            <div class="upload-format-note">
-              <strong>Поддерживаемые поля:</strong>
-              <p>`date`, `load` или `actual_load`, а также `venue` или `venue_id`.</p>
-              <p>Также поддерживаются колонки: `Учетный день`, `Количество гостей`, `заказов`.</p>
-            </div>
+          
 
             <div v-if="forecastUploadFileName" class="upload-preview-card">
               <p v-if="forecastUploadFileName"><strong>Файл:</strong> {{ forecastUploadFileName }}</p>
@@ -419,6 +484,92 @@
         </div>
       </div>
     </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showCreateVenueModal" class="modal-overlay" @click.self="closeCreateVenueModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Admin</p>
+              <h2 class="modal-title">Создание заведения</h2>
+            </div>
+            <button class="modal-close" @click="closeCreateVenueModal">×</button>
+          </div>
+
+          <form class="role-form" @submit.prevent="submitCreateVenue">
+            <div v-if="createVenueError" class="form-alert error">
+              {{ createVenueError }}
+            </div>
+
+            <div v-if="createVenueSuccess" class="form-alert success">
+              {{ createVenueSuccess }}
+            </div>
+
+            <div class="form-grid">
+              <label class="form-field">
+                <span>Название *</span>
+                <input
+                  v-model.trim="createVenueForm.name"
+                  type="text"
+                  placeholder="Новый ресторан"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field">
+                <span>Таймзона *</span>
+                <input
+                  v-model.trim="createVenueForm.timezone"
+                  type="text"
+                  placeholder="Asia/Vladivostok"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full">
+                <span>Адрес *</span>
+                <input
+                  v-model.trim="createVenueForm.address"
+                  type="text"
+                  placeholder="г. Владивосток, ул. Пример, 1"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full checkbox-field">
+                <input
+                  v-model="createVenueForm.is_active"
+                  type="checkbox"
+                  :disabled="isCreatingVenue"
+                />
+                <span>Заведение активно</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button
+                type="button"
+                class="wide-button secondary"
+                :disabled="isCreatingVenue"
+                @click="closeCreateVenueModal"
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                class="wide-button"
+                :disabled="isCreatingVenue"
+              >
+                {{ isCreatingVenue ? createVenueLoadingLabel : createVenueSubmitLabel }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -426,6 +577,7 @@
 import '../assets/cabinet.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
+import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { uploadHistoricalForecastFile } from '../services/forecast'
 
@@ -447,6 +599,24 @@ const getDefaultCreateRoleForm = () => ({
   role: 'employee_noob',
   venue: '',
   venue_name: ''
+})
+
+const getDefaultCreateVenueForm = () => ({
+  name: '',
+  address: '',
+  timezone: 'Asia/Vladivostok',
+  is_active: true
+})
+
+const getDefaultManageEmployeeForm = () => ({
+  id: null,
+  username: '',
+  email: '',
+  first_name: '',
+  last_name: '',
+  phone: '',
+  role: 'employee_noob',
+  venue: ''
 })
 
 const asArray = (payload) => {
@@ -479,7 +649,8 @@ const getVenueId = (entity) => {
 export default {
   name: 'CabinetView',
   components: {
-    NotificationBell
+    NotificationBell,
+    ThemedSelect
   },
   data() {
     let savedUser = null
@@ -493,24 +664,38 @@ export default {
     return {
       menuOpen: false,
       showEmployeesModal: false,
+      showManageEmployeeModal: false,
       showCreateRoleModal: false,
+      showCreateVenueModal: false,
       showUploadDataModal: false,
       isLoadingEmployees: false,
+      isLoadingManagedEmployee: false,
       isCreatingRole: false,
+      isCreatingVenue: false,
       isUploadingForecastData: false,
+      isSavingManagedEmployee: false,
       employeesError: '',
+      manageEmployeeError: '',
+      manageEmployeeSuccess: '',
       createRoleError: '',
       createRoleSuccess: '',
+      createVenueError: '',
+      createVenueSuccess: '',
       uploadDataError: '',
       uploadDataSuccess: '',
       copyNotice: '',
+      createVenueSubmitLabel: '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0432\u0435\u0434\u0435\u043d\u0438\u0435',
+      createVenueLoadingLabel: '\u0421\u043e\u0437\u0434\u0430\u0435\u043c...',
       employees: [],
       venues: [],
       forecastUploadVenueId: '',
       forecastUploadFile: null,
       forecastUploadFileName: '',
       forecastUploadPreview: [],
+      managedEmployeeOriginal: null,
       createRoleForm: getDefaultCreateRoleForm(),
+      manageEmployeeForm: getDefaultManageEmployeeForm(),
+      createVenueForm: getDefaultCreateVenueForm(),
       user: savedUser || {
         username: '',
         email: '',
@@ -613,6 +798,24 @@ export default {
         { key: 'employee_noob', title: 'Официанты-стажеры', items: this.groupedEmployees.employee_noob },
         { key: 'employee_pro', title: 'Официанты-профи', items: this.groupedEmployees.employee_pro }
       ]
+    },
+    venueOptions() {
+      return this.venues.map((venue) => ({
+        value: venue.id,
+        label: venue.venue_name || venue.name || `Заведение #${venue.id}`
+      }))
+    },
+    manageVenueOptions() {
+      return [
+        { value: '', label: 'Без заведения' },
+        ...this.venueOptions
+      ]
+    },
+    forecastVenueOptions() {
+      return [
+        { value: '', label: 'Из файла или не указывать' },
+        ...this.venueOptions
+      ]
     }
   },
   async mounted() {
@@ -650,6 +853,9 @@ export default {
     getEmployeeFullName(employee) {
       const fullName = [employee?.first_name, employee?.last_name].filter(Boolean).join(' ').trim()
       return fullName || employee?.username || 'Без имени'
+    },
+    canAdminManageEmployee(employee) {
+      return this.currentUserRole === 'admin' && Boolean(employee?.id)
     },
     getVenueLabel(entity) {
       return (
@@ -713,6 +919,59 @@ export default {
       this.showEmployeesModal = false
       this.employeesError = ''
     },
+    async openManageEmployeeModal(employee) {
+      if (!this.canAdminManageEmployee(employee)) {
+        return
+      }
+
+      this.showManageEmployeeModal = true
+      this.isLoadingManagedEmployee = true
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.managedEmployeeOriginal = null
+      this.manageEmployeeForm = getDefaultManageEmployeeForm()
+
+      try {
+        if (!this.venues.length) {
+          await this.loadVenues()
+        }
+
+        const response = await api.get(`/users/${employee.id}/`)
+        const payload = response?.data || employee
+        const venueId = getVenueId(payload)
+        const normalizedRole = normalizeRole(payload.role) || 'employee_noob'
+
+        this.managedEmployeeOriginal = {
+          id: payload.id,
+          username: payload.username || '',
+          email: payload.email || '',
+          first_name: payload.first_name || '',
+          last_name: payload.last_name || '',
+          phone: payload.phone || '',
+          role: normalizedRole,
+          venue: venueId === null ? '' : venueId
+        }
+
+        this.manageEmployeeForm = {
+          ...this.managedEmployeeOriginal
+        }
+      } catch (error) {
+        this.manageEmployeeError = this.extractErrorMessage(error, 'Не удалось загрузить сотрудника')
+      } finally {
+        this.isLoadingManagedEmployee = false
+      }
+    },
+    closeManageEmployeeModal() {
+      if (this.isSavingManagedEmployee || this.isLoadingManagedEmployee) {
+        return
+      }
+
+      this.showManageEmployeeModal = false
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.managedEmployeeOriginal = null
+      this.manageEmployeeForm = getDefaultManageEmployeeForm()
+    },
     openCreateRoleModal() {
       this.createRoleError = ''
       this.createRoleSuccess = ''
@@ -739,6 +998,22 @@ export default {
       this.createRoleError = ''
       this.createRoleSuccess = ''
       this.copyNotice = ''
+    },
+    openCreateVenueModal() {
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
+      this.showCreateVenueModal = true
+    },
+    closeCreateVenueModal() {
+      if (this.isCreatingVenue) {
+        return
+      }
+
+      this.showCreateVenueModal = false
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
     },
     openUploadDataModal() {
       this.showUploadDataModal = true
@@ -967,14 +1242,68 @@ export default {
 
       return payload
     },
+    buildCreateVenuePayload() {
+      const name = this.createVenueForm.name.trim()
+      const address = this.createVenueForm.address.trim()
+      const timezone = this.createVenueForm.timezone.trim()
+
+      return {
+        name,
+        address,
+        timezone,
+        is_active: this.createVenueForm.is_active
+      }
+    },
+    buildManageEmployeePayload() {
+      const payload = {
+        username: this.manageEmployeeForm.username.trim(),
+        email: this.manageEmployeeForm.email.trim(),
+        first_name: this.manageEmployeeForm.first_name.trim(),
+        last_name: this.manageEmployeeForm.last_name.trim(),
+        phone: this.manageEmployeeForm.phone.trim(),
+        role: this.manageEmployeeForm.role || 'employee_noob'
+      }
+
+      if (this.manageEmployeeForm.venue !== '' && this.manageEmployeeForm.venue !== null && this.manageEmployeeForm.venue !== undefined) {
+        payload.venue = Number(this.manageEmployeeForm.venue)
+      } else {
+        payload.venue = null
+      }
+
+      return payload
+    },
     extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
+      const status = Number(error?.response?.status)
 
       if (!data) {
         return error?.message || fallbackMessage
       }
 
       if (typeof data === 'string') {
+        const normalized = data.trim()
+
+        if (/^<!doctype html/i.test(normalized) || /^<html/i.test(normalized)) {
+          const titleMatch = normalized.match(/<title>(.*?)<\/title>/i)
+          const title = titleMatch?.[1]?.trim()
+
+          if (status === 404) {
+            return title
+              ? `Сервер не нашел нужный маршрут: ${title}.`
+              : 'Сервер не нашел нужный маршрут.'
+          }
+
+          if (status === 405) {
+            return title
+              ? `Сервер отклонил метод запроса: ${title}.`
+              : 'Сервер отклонил метод запроса.'
+          }
+
+          return title
+            ? `${fallbackMessage}. ${title}.`
+            : fallbackMessage
+        }
+
         return data
       }
 
@@ -1065,7 +1394,74 @@ export default {
       } finally {
         this.isCreatingRole = false
       }
+    },
+    async submitCreateVenue() {
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+
+      if (!this.createVenueForm.name.trim()) {
+        this.createVenueError = 'Название заведения обязательно'
+        return
+      }
+
+      if (!this.createVenueForm.address.trim()) {
+        this.createVenueError = 'Адрес заведения обязателен'
+        return
+      }
+
+      if (!this.createVenueForm.timezone.trim()) {
+        this.createVenueError = 'Таймзона обязательна'
+        return
+      }
+
+      this.isCreatingVenue = true
+
+      try {
+        await api.post('/venues/create/', this.buildCreateVenuePayload())
+        this.createVenueSuccess = 'Заведение успешно создано'
+        this.createVenueForm = getDefaultCreateVenueForm()
+        await this.loadVenues()
+      } catch (error) {
+        this.createVenueError = this.extractErrorMessage(error, 'Не удалось создать заведение')
+      } finally {
+        this.isCreatingVenue = false
+      }
+    },
+    async submitManageEmployee() {
+      if (!this.manageEmployeeForm.id || this.currentUserRole !== 'admin') {
+        return
+      }
+
+      this.manageEmployeeError = ''
+      this.manageEmployeeSuccess = ''
+      this.isSavingManagedEmployee = true
+
+      try {
+        await api.patch(`/users/${this.manageEmployeeForm.id}/`, this.buildManageEmployeePayload())
+
+        if (Number(this.manageEmployeeForm.id) === Number(this.user?.id)) {
+          const freshUser = await fetchCurrentUser()
+          this.user = freshUser
+          localStorage.setItem('user', JSON.stringify(freshUser))
+        }
+
+        await this.loadEmployees()
+        this.manageEmployeeSuccess = 'Данные сотрудника обновлены'
+        this.managedEmployeeOriginal = {
+          ...this.manageEmployeeForm,
+          role: normalizeRole(this.manageEmployeeForm.role)
+        }
+      } catch (error) {
+        this.manageEmployeeError = this.extractErrorMessage(error, 'Не удалось обновить сотрудника')
+      } finally {
+        this.isSavingManagedEmployee = false
+      }
     }
   }
 }
 </script>
+
+
+
+
+
