@@ -6,8 +6,11 @@ from .views import (
     MonthlyScheduleListView,
     MonthlyScheduleDetailView,
     PublishScheduleView,
+    UnpublishScheduleView,
     DeleteScheduleView,
     UpdateDraftScheduleEntriesView,
+    AddDraftSlotView,
+    DeleteDraftSlotView,
     ClaimSlotView,
     AssignSlotView,
     UnassignSlotView,
@@ -35,7 +38,18 @@ urlpatterns = [
         UpdateDraftScheduleEntriesView.as_view(),
         name="schedule-entries-bulk-update",
     ),
+    path(
+        "schedule/monthly/<int:pk>/slots/add/",
+        AddDraftSlotView.as_view(),
+        name="schedule-slots-add",
+    ),
+    path(
+        "schedule/monthly/<int:pk>/slots/<int:slot_id>/delete/",
+        DeleteDraftSlotView.as_view(),
+        name="schedule-slots-delete",
+    ),
     path("schedule/monthly/<int:pk>/publish/", PublishScheduleView.as_view(), name="schedule-publish"),
+    path("schedule/monthly/<int:pk>/unpublish/", UnpublishScheduleView.as_view(), name="schedule-unpublish"),
     path("schedule/monthly/<int:pk>/delete/", DeleteScheduleView.as_view(), name="schedule-delete"),
 
     # Slots

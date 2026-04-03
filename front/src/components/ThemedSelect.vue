@@ -11,8 +11,15 @@
       <span class="themed-select-arrow" aria-hidden="true"></span>
     </button>
 
+  </div>
+
+  <Teleport to="body">
     <transition name="themed-select-pop">
-      <div v-if="isOpen" class="themed-select-menu">
+      <div
+        v-if="isOpen"
+        class="themed-select-menu themed-select-menu-teleported"
+        :style="menuStyle"
+      >
         <button
           v-for="option in normalizedOptions"
           :key="buildOptionKey(option)"
@@ -26,7 +33,7 @@
         </button>
       </div>
     </transition>
-  </div>
+  </Teleport>
 </template>
 
 <script>
@@ -53,7 +60,12 @@ export default {
   emits: ['update:modelValue', 'change'],
   data() {
     return {
-      isOpen: false
+      isOpen: false,
+      menuStyle: {
+        top: '0px',
+        left: '0px',
+        width: '0px'
+      }
     }
   },
   computed: {
@@ -81,10 +93,14 @@ export default {
   mounted() {
     window.addEventListener('click', this.handleOutsideClick)
     window.addEventListener('keydown', this.handleEscape)
+    window.addEventListener('resize', this.updateMenuPosition)
+    window.addEventListener('scroll', this.updateMenuPosition, true)
   },
   beforeUnmount() {
     window.removeEventListener('click', this.handleOutsideClick)
     window.removeEventListener('keydown', this.handleEscape)
+    window.removeEventListener('resize', this.updateMenuPosition)
+    window.removeEventListener('scroll', this.updateMenuPosition, true)
   },
   methods: {
     toggleOpen() {
@@ -93,6 +109,11 @@ export default {
       }
 
       this.isOpen = !this.isOpen
+      if (this.isOpen) {
+        this.$nextTick(() => {
+          this.updateMenuPosition()
+        })
+      }
     },
     closeOpen() {
       this.isOpen = false
@@ -135,6 +156,18 @@ export default {
     handleEscape(event) {
       if (event.key === 'Escape') {
         this.closeOpen()
+      }
+    },
+    updateMenuPosition() {
+      if (!this.isOpen || !this.$refs.root) {
+        return
+      }
+
+      const rect = this.$refs.root.getBoundingClientRect()
+      this.menuStyle = {
+        top: `${rect.bottom + 10}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`
       }
     }
   }
@@ -213,10 +246,6 @@ export default {
 }
 
 .themed-select-menu {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  right: 0;
   z-index: 120;
   display: grid;
   gap: 6px;
@@ -228,6 +257,10 @@ export default {
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.34);
   max-height: 240px;
   overflow-y: auto;
+}
+
+.themed-select-menu-teleported {
+  position: fixed;
 }
 
 .themed-select-option {

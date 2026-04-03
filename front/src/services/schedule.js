@@ -195,29 +195,43 @@ const buildAssignedEmployeeName = (item, employee) => {
   return employee.username || employee.email || ''
 }
 
-const extractEmployeeGrade = (item, employee) => {
-  const directGrade = firstDefined(
-    item.grade,
-    item.employee_grade,
-    item.employee_role,
-    employee.grade,
-    employee.role,
-    employee.position
-  )
+const normalizeEmployeeGrade = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
 
-  if (directGrade) {
-    return directGrade
+  if (!normalized) {
+    return null
+  }
+
+  if (['employee_noob', 'noob', 'intern', 'trainee', 'стажер', 'стажёр'].includes(normalized)) {
+    return 'employee_noob'
+  }
+
+  if (['employee_pro', 'pro', 'senior', 'experienced', 'опытный', 'профи'].includes(normalized)) {
+    return 'employee_pro'
+  }
+
+  return normalized
+}
+
+const extractEmployeeGrade = (item, employee) => {
+  if (item.employee_noob === true) {
+    return 'employee_noob'
   }
 
   if (item.employee_pro === true) {
     return 'employee_pro'
   }
 
-  if (item.employee_noob === true) {
-    return 'employee_noob'
-  }
-
-  return null
+  return normalizeEmployeeGrade(firstDefined(
+    item.grade,
+    item.employee_grade,
+    item.employee_level,
+    item.employee_role,
+    employee.grade,
+    employee.employee_level,
+    employee.role,
+    employee.position
+  ))
 }
 
 const normalizeEmployeeKey = (item, employee) => {
@@ -659,6 +673,27 @@ const buildMockShift = (date, waiter, shiftType, start, end, hours) => ({
   assignment_status: 'assigned'
 })
 
+const createMockEntriesForWaiter = (monthDate, waiter) => {
+  const range = buildMonthRange(monthDate)
+  const entries = []
+  const daysInMonth = Number(range.endDate.slice(-2))
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${range.year}-${padNumber(range.month)}-${padNumber(day)}`
+    const cycle = (day + Number(waiter.waiter_num || 0)) % 4
+
+    if (cycle === 0) {
+      entries.push(buildMockShift(date, waiter, 'morning', '09:00', '17:00', 8))
+    } else if (cycle === 1) {
+      entries.push(buildMockShift(date, waiter, 'evening', '15:00', '23:00', 8))
+    } else if (cycle === 2) {
+      entries.push(buildMockShift(date, waiter, 'full', '10:00', '22:00', 12))
+    }
+  }
+
+  return entries
+}
+
 const generateMockEntriesForMonth = (monthDate) => {
   const range = buildMonthRange(monthDate)
   const waiters = createMockWaiters()
@@ -872,6 +907,130 @@ export const publishSchedule = async ({ scheduleId, monthDate = new Date() } = {
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось опубликовать расписание'))
+  }
+}
+
+export const unpublishSchedule = async ({ scheduleId, monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для перевода в черновик')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (monthData && monthData.scheduleId === scheduleId) {
+      saved[range.monthKey] = {
+        ...monthData,
+        status: 'draft'
+      }
+
+      localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    }
+
+    return { schedule_id: scheduleId, status: 'draft' }
+  }
+
+  try {
+    const response = await api.post(`/schedule/monthly/${scheduleId}/unpublish/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось перевести расписание в черновик'))
+  }
+}
+
+export const addScheduleSlot = async ({ scheduleId, employeeLevel, monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для добавления места')
+  }
+
+  if (!employeeLevel) {
+    throw new Error('Не выбрана категория официанта')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (!monthData || monthData.scheduleId !== scheduleId) {
+      throw new Error('Не удалось найти черновик для добавления места')
+    }
+
+    const existingWaiterNumbers = monthData.entries
+      .map((entry) => Number(entry.waiter_num))
+      .filter((value) => Number.isFinite(value) && value > 0)
+
+    const nextWaiterNumber = (existingWaiterNumbers.length ? Math.max(...existingWaiterNumbers) : 0) + 1
+    const waiter = {
+      employee_key: `waiter-${nextWaiterNumber}`,
+      employee_label: `Официант ${nextWaiterNumber}`,
+      waiter_num: nextWaiterNumber,
+      grade: employeeLevel
+    }
+
+    const nextEntries = [...monthData.entries, ...createMockEntriesForWaiter(monthDate, waiter)]
+
+    saved[range.monthKey] = {
+      ...monthData,
+      entries: nextEntries
+    }
+
+    localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    return { schedule_id: scheduleId, employee_level: employeeLevel, added_slots_count: 1 }
+  }
+
+  try {
+    const response = await api.post(`/schedule/monthly/${scheduleId}/slots/add/`, {
+      employee_level: employeeLevel
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось добавить место в черновик'))
+  }
+}
+
+export const deleteScheduleSlot = async ({ scheduleId, slotId, slotPositionKey = '', monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для удаления места')
+  }
+
+  if (!slotId) {
+    throw new Error('Не удалось определить место для удаления')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (!monthData || monthData.scheduleId !== scheduleId) {
+      throw new Error('Не удалось найти черновик для удаления места')
+    }
+
+    const nextEntries = monthData.entries.filter((entry) => {
+      if (slotPositionKey) {
+        return String(entry.slot_position_key || '') !== String(slotPositionKey)
+      }
+
+      return String(entry.slot_id || '') !== String(slotId)
+    })
+
+    saved[range.monthKey] = {
+      ...monthData,
+      entries: nextEntries
+    }
+
+    localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    return { schedule_id: scheduleId, slot_id: slotId, deleted: true }
+  }
+
+  try {
+    const response = await api.delete(`/schedule/monthly/${scheduleId}/slots/${slotId}/delete/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось удалить место из черновика'))
   }
 }
 

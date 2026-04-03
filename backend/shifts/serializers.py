@@ -68,6 +68,15 @@ class ScheduleEntryPatchSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            normalized = data.copy()
+            for field in ("work_start", "work_end"):
+                if normalized.get(field) == "":
+                    normalized[field] = None
+            data = normalized
+        return super().to_internal_value(data)
+
     def update(self, instance, validated_data):
         # id нужен только для маппинга в bulk update.
         validated_data.pop("id", None)

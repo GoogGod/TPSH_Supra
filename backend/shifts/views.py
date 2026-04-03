@@ -20,7 +20,7 @@ from .serializers import (
 )
 from .services.csv_parser import parse_schedule_csv, CSVParseError
 from users.permissions import IsManager, IsAdmin
-from datetime import date
+from datetime import date, time
 import calendar
 import csv
 from pathlib import Path
@@ -286,6 +286,37 @@ class PublishScheduleView(APIView):
         return Response({"detail": "Расписание опубликовано."})
 
 
+class UnpublishScheduleView(APIView):
+    """Вернуть опубликованное расписание в черновик."""
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def post(self, request, pk):
+        try:
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
+        except MonthlySchedule.DoesNotExist:
+            return Response({"detail": "Не найдено."}, status=404)
+
+        if request.user.is_manager and not request.user.is_admin_role:
+            if not request.user.venue_id or request.user.venue_id != schedule.venue_id:
+                return Response(
+                    {"detail": "Доступ к этому расписанию запрещен."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if schedule.status == MonthlySchedule.Status.DRAFT:
+            return Response(
+                {"detail": "Расписание уже в черновике."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        schedule.status = MonthlySchedule.Status.DRAFT
+        schedule.published_at = None
+        schedule.published_by = None
+        schedule.save(update_fields=["status", "published_at", "published_by", "updated_at"])
+
+        return Response({"detail": "Расписание переведено в черновик."})
+
+
 # ═══════════ Удалить черновик ═══════════
 
 class DeleteScheduleView(APIView):
@@ -453,6 +484,200 @@ class UpdateDraftScheduleEntriesView(APIView):
                 "detail": "Черновик расписания обновлен.",
                 "schedule_id": schedule.id,
                 "updated_entries_count": len(prepared),
+                "updated_at": schedule.updated_at,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AddDraftSlotView(APIView):
+    """Добавить новую позицию официанта в черновик расписания."""
+    permission_classes = [IsAuthenticated, IsManager]
+
+    @extend_schema(
+        summary="Добавить позицию в черновик расписания",
+        tags=["schedule"],
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "employee_level": {
+                        "type": "string",
+                        "enum": ["employee_pro", "employee_noob"],
+                        "nullable": True,
+                    },
+                    "waiters_needed": {
+                        "type": "integer",
+                        "minimum": 0,
+                    },
+                },
+            }
+        },
+    )
+    def post(self, request, pk):
+        try:
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
+        except MonthlySchedule.DoesNotExist:
+            return Response({"detail": "Не найдено."}, status=404)
+
+        user = request.user
+        if user.is_manager and not user.is_admin_role:
+            if not user.venue_id or user.venue_id != schedule.venue_id:
+                return Response(
+                    {"detail": "Доступ к этому расписанию запрещен."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if schedule.status != MonthlySchedule.Status.DRAFT:
+            return Response(
+                {"detail": "Добавлять позиции можно только в черновик."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        employee_level = request.data.get("employee_level")
+        if employee_level in ("", None):
+            employee_level = None
+        elif employee_level not in dict(WaiterSlot.EmployeeLevel.choices):
+            return Response(
+                {
+                    "detail": "Некорректный employee_level.",
+                    "allowed": list(dict(WaiterSlot.EmployeeLevel.choices).keys()),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        waiters_needed = request.data.get("waiters_needed")
+        if waiters_needed in ("", None):
+            waiters_needed = None
+        else:
+            try:
+                waiters_needed = int(waiters_needed)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "waiters_needed должен быть целым числом >= 0."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if waiters_needed < 0:
+                return Response(
+                    {"detail": "waiters_needed должен быть целым числом >= 0."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        existing_dates = list(
+            ScheduleEntry.objects.filter(slot__schedule=schedule)
+            .order_by("date")
+            .values_list("date", flat=True)
+            .distinct()
+        )
+        if not existing_dates:
+            return Response(
+                {"detail": "В расписании нет дат для создания слота."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if waiters_needed is None:
+            day_need_map = {
+                item["date"]: item["max_need"] or 0
+                for item in ScheduleEntry.objects.filter(
+                    slot__schedule=schedule,
+                    date__in=existing_dates,
+                )
+                .values("date")
+                .annotate(max_need=Max("waiters_needed"))
+            }
+        else:
+            day_need_map = {d: waiters_needed for d in existing_dates}
+
+        max_num = (
+            WaiterSlot.objects.filter(schedule=schedule).aggregate(max_num=Max("waiter_num"))["max_num"] or 0
+        )
+
+        with transaction.atomic():
+            slot = WaiterSlot.objects.create(
+                schedule=schedule,
+                waiter_num=max_num + 1,
+                employee_level=employee_level,
+                assignment_status=WaiterSlot.AssignmentStatus.OPEN,
+            )
+            entries = []
+            first_work_date = existing_dates[0]
+            for entry_date in existing_dates:
+                is_first_day = entry_date == first_work_date
+                entries.append(
+                    ScheduleEntry(
+                        slot=slot,
+                        date=entry_date,
+                        is_working=is_first_day,
+                        shift_type=ScheduleEntry.ShiftType.FULL if is_first_day else ScheduleEntry.ShiftType.OFF,
+                        waiters_needed=day_need_map.get(entry_date, 0),
+                        work_start=time(10, 0) if is_first_day else None,
+                        work_end=time(22, 0) if is_first_day else None,
+                        work_hours=12 if is_first_day else 0,
+                    )
+                )
+            ScheduleEntry.objects.bulk_create(entries)
+            MonthlySchedule.objects.filter(pk=schedule.pk).update(updated_at=timezone.now())
+
+        schedule.refresh_from_db(fields=["updated_at"])
+        return Response(
+            {
+                "detail": "Позиция добавлена в черновик.",
+                "schedule_id": schedule.id,
+                "slot_id": slot.id,
+                "waiter_num": slot.waiter_num,
+                "employee_level": slot.employee_level,
+                "entries_count": len(entries),
+                "updated_at": schedule.updated_at,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DeleteDraftSlotView(APIView):
+    """Удалить позицию официанта из черновика расписания."""
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def delete(self, request, pk, slot_id):
+        try:
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
+        except MonthlySchedule.DoesNotExist:
+            return Response({"detail": "Не найдено."}, status=404)
+
+        user = request.user
+        if user.is_manager and not user.is_admin_role:
+            if not user.venue_id or user.venue_id != schedule.venue_id:
+                return Response(
+                    {"detail": "Доступ к этому расписанию запрещен."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if schedule.status != MonthlySchedule.Status.DRAFT:
+            return Response(
+                {"detail": "Удалять позиции можно только в черновике."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            slot = WaiterSlot.objects.get(pk=slot_id, schedule=schedule)
+        except WaiterSlot.DoesNotExist:
+            return Response({"detail": "Позиция не найдена в этом расписании."}, status=404)
+
+        deleted_slot_id = slot.id
+        deleted_waiter_num = slot.waiter_num
+
+        with transaction.atomic():
+            slot.delete()
+            MonthlySchedule.objects.filter(pk=schedule.pk).update(updated_at=timezone.now())
+
+        schedule.refresh_from_db(fields=["updated_at"])
+        remaining_slots = WaiterSlot.objects.filter(schedule=schedule).count()
+        return Response(
+            {
+                "detail": "Позиция удалена из черновика.",
+                "schedule_id": schedule.id,
+                "slot_id": deleted_slot_id,
+                "waiter_num": deleted_waiter_num,
+                "remaining_slots": remaining_slots,
                 "updated_at": schedule.updated_at,
             },
             status=status.HTTP_200_OK,

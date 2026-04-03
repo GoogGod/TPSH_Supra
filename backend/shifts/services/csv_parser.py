@@ -261,9 +261,9 @@ def _parse_waiter_level(waiter_type, waiter_type_code):
     type_raw = str(waiter_type or "").strip().lower()
     code_raw = str(waiter_type_code or "").strip().lower()
 
-    if type_raw in {"pro", "professional", "профессионал", "опытный"}:
+    if type_raw in {"employee_pro", "pro", "professional", "профессионал", "опытный"}:
         return "employee_pro"
-    if type_raw in {"noob", "noob", "новичок", "стажер", "стажёр"}:
+    if type_raw in {"employee_noob", "noob", "novice", "новичок", "стажер", "стажёр"}:
         return "employee_noob"
 
     if code_raw in {"1", "pro", "p"}:

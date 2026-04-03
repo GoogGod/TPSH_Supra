@@ -261,3 +261,182 @@ class ShiftsApiTests(APITestCase):
             related_slot=slot,
         ).first()
         self.assertIsNotNone(notification)
+
+    def test_manager_can_unpublish_schedule(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=5,
+            status=MonthlySchedule.Status.PUBLISHED,
+            published_by=self.manager,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(reverse("schedule-unpublish", args=[schedule.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["detail"], "Расписание переведено в черновик.")
+
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.status, MonthlySchedule.Status.DRAFT)
+        self.assertIsNone(schedule.published_at)
+        self.assertIsNone(schedule.published_by)
+
+    def test_manager_can_add_new_slot_to_draft_schedule(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=6,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        existing_slot = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        ScheduleEntry.objects.create(
+            slot=existing_slot,
+            date=date(2026, 6, 1),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=3,
+            work_hours=12,
+        )
+        ScheduleEntry.objects.create(
+            slot=existing_slot,
+            date=date(2026, 6, 2),
+            is_working=False,
+            shift_type=ScheduleEntry.ShiftType.OFF,
+            waiters_needed=2,
+            work_hours=0,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(
+            reverse("schedule-slots-add", args=[schedule.id]),
+            {"employee_level": WaiterSlot.EmployeeLevel.EMPLOYEE_PRO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["waiter_num"], 2)
+        self.assertEqual(response.data["entries_count"], 2)
+
+        new_slot = WaiterSlot.objects.get(pk=response.data["slot_id"])
+        self.assertEqual(new_slot.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_PRO)
+        new_entries = list(new_slot.entries.order_by("date"))
+        self.assertEqual(len(new_entries), 2)
+        self.assertTrue(new_entries[0].is_working)
+        self.assertEqual(new_entries[0].shift_type, ScheduleEntry.ShiftType.FULL)
+        self.assertIsNotNone(new_entries[0].work_start)
+        self.assertIsNotNone(new_entries[0].work_end)
+        self.assertEqual(new_entries[0].waiters_needed, 3)
+        self.assertFalse(new_entries[1].is_working)
+        self.assertEqual(new_entries[1].shift_type, ScheduleEntry.ShiftType.OFF)
+        self.assertEqual(new_entries[1].waiters_needed, 2)
+
+    def test_manager_cannot_add_slot_to_published_schedule(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=7,
+            status=MonthlySchedule.Status.PUBLISHED,
+            published_by=self.manager,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(reverse("schedule-slots-add", args=[schedule.id]), {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_bulk_update_accepts_empty_time_strings_for_day_off(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=8,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        slot = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        entry = ScheduleEntry.objects.create(
+            slot=slot,
+            date=date(2026, 8, 10),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=2,
+            work_hours=12,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.patch(
+            reverse("schedule-entries-bulk-update", args=[schedule.id]),
+            {
+                "updates": [
+                    {
+                        "id": entry.id,
+                        "is_working": False,
+                        "shift_type": ScheduleEntry.ShiftType.OFF,
+                        "waiters_needed": 0,
+                        "work_start": "",
+                        "work_end": "",
+                        "work_hours": 0,
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        entry.refresh_from_db()
+        self.assertFalse(entry.is_working)
+        self.assertEqual(entry.shift_type, ScheduleEntry.ShiftType.OFF)
+        self.assertEqual(entry.waiters_needed, 0)
+        self.assertIsNone(entry.work_start)
+        self.assertIsNone(entry.work_end)
+
+    def test_manager_can_delete_slot_from_draft_schedule(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=9,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        slot_1 = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        slot_2 = WaiterSlot.objects.create(schedule=schedule, waiter_num=2)
+        ScheduleEntry.objects.create(
+            slot=slot_1,
+            date=date(2026, 9, 1),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=2,
+            work_hours=12,
+        )
+        ScheduleEntry.objects.create(
+            slot=slot_2,
+            date=date(2026, 9, 1),
+            is_working=False,
+            shift_type=ScheduleEntry.ShiftType.OFF,
+            waiters_needed=2,
+            work_hours=0,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.delete(
+            reverse("schedule-slots-delete", args=[schedule.id, slot_2.id]),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["detail"], "Позиция удалена из черновика.")
+        self.assertFalse(WaiterSlot.objects.filter(pk=slot_2.id).exists())
+        self.assertFalse(ScheduleEntry.objects.filter(slot_id=slot_2.id).exists())
+        self.assertEqual(WaiterSlot.objects.filter(schedule=schedule).count(), 1)
+
+    def test_manager_cannot_delete_slot_from_published_schedule(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=10,
+            status=MonthlySchedule.Status.PUBLISHED,
+            published_by=self.manager,
+        )
+        slot = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.delete(
+            reverse("schedule-slots-delete", args=[schedule.id, slot.id]),
+        )
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
