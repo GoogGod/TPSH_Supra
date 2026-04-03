@@ -225,8 +225,10 @@ const extractEmployeeGrade = (item, employee) => {
   return normalizeEmployeeGrade(firstDefined(
     item.grade,
     item.employee_grade,
+    item.employee_level,
     item.employee_role,
     employee.grade,
+    employee.employee_level,
     employee.role,
     employee.position
   ))
@@ -986,6 +988,49 @@ export const addScheduleSlot = async ({ scheduleId, employeeLevel, monthDate = n
     return response.data
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Не удалось добавить место в черновик'))
+  }
+}
+
+export const deleteScheduleSlot = async ({ scheduleId, slotId, slotPositionKey = '', monthDate = new Date() } = {}) => {
+  if (!scheduleId) {
+    throw new Error('Не удалось определить расписание для удаления места')
+  }
+
+  if (!slotId) {
+    throw new Error('Не удалось определить место для удаления')
+  }
+
+  if (USE_MOCK_AUTH) {
+    const range = buildMonthRange(monthDate)
+    const saved = getStoredMockMonths()
+    const monthData = saved[range.monthKey]
+
+    if (!monthData || monthData.scheduleId !== scheduleId) {
+      throw new Error('Не удалось найти черновик для удаления места')
+    }
+
+    const nextEntries = monthData.entries.filter((entry) => {
+      if (slotPositionKey) {
+        return String(entry.slot_position_key || '') !== String(slotPositionKey)
+      }
+
+      return String(entry.slot_id || '') !== String(slotId)
+    })
+
+    saved[range.monthKey] = {
+      ...monthData,
+      entries: nextEntries
+    }
+
+    localStorage.setItem(MOCK_SCHEDULE_STORAGE_KEY, JSON.stringify(saved))
+    return { schedule_id: scheduleId, slot_id: slotId, deleted: true }
+  }
+
+  try {
+    const response = await api.delete(`/schedule/monthly/${scheduleId}/slots/${slotId}/delete/`)
+    return response.data
+  } catch (error) {
+    throw new Error(extractErrorMessage(error, 'Не удалось удалить место из черновика'))
   }
 }
 

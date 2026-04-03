@@ -107,9 +107,16 @@
           </div>
         </div>
 
-        <div v-if="canToggleScheduleStatus || canAddScheduleSlot" class="bottom-actions" :class="{ 'bottom-actions-single': !canAddScheduleSlot || !canToggleScheduleStatus }">
+        <div
+          v-if="canToggleScheduleStatus || canAddScheduleSlot || canDeleteScheduleSlot"
+          class="bottom-actions"
+          :class="{ 'bottom-actions-single': bottomActionCount === 1 }"
+        >
           <button v-if="canAddScheduleSlot" class="create-schedule-button" :disabled="isAddingSlot" @click="openAddSlotModal">
             {{ isAddingSlot ? 'Добавляем...' : 'Добавить место' }}
+          </button>
+          <button v-if="canDeleteScheduleSlot" class="unassign-slot-button" :disabled="isDeletingSlot" @click="handleDeleteSlot">
+            {{ isDeletingSlot ? 'Удаляем...' : 'Удалить место' }}
           </button>
           <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handleToggleScheduleStatus">{{ scheduleToggleButtonLabel }}</button>
         </div>
@@ -244,7 +251,7 @@ import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { addScheduleSlot, assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
+import { addScheduleSlot, assignScheduleSlot, claimScheduleSlot, deleteScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
 const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
@@ -308,6 +315,7 @@ export default {
       isGeneratingSchedule: false,
       isPublishingSchedule: false,
       isAddingSlot: false,
+      isDeletingSlot: false,
       isClaimingSlot: false,
       isUnassigningSlot: false,
       isAssigningSlot: false,
@@ -331,13 +339,17 @@ export default {
     isPublishedSchedule() { return this.currentScheduleStatus === 'published' },
     canToggleScheduleStatus() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && (this.isDraftSchedule || this.isPublishedSchedule) },
     canAddScheduleSlot() { return this.canManageSchedule && this.isDraftSchedule && !!this.currentScheduleId },
+    canDeleteScheduleSlot() { return this.canManageSchedule && this.isDraftSchedule && !!this.currentScheduleId && !!this.selectedWaiterInfo?.slot_id },
+    bottomActionCount() {
+      return [this.canAddScheduleSlot, this.canDeleteScheduleSlot, this.canToggleScheduleStatus].filter(Boolean).length
+    },
     scheduleToggleButtonLabel() {
       if (this.isPublishingSchedule) return this.isDraftSchedule ? 'Публикуем...' : 'Переводим в черновик...'
       return this.isDraftSchedule ? 'Опубликовать' : 'Редактировать'
     },
     roleHint() { return this.canManageSchedule ? (this.isDraftSchedule ? 'Черновик открыт: выберите место, поправьте смены и затем опубликуйте расписание.' : 'Выберите место и управляйте закреплениями сотрудников.') : 'Выберите место и закрепитесь за ним. Официант может быть закреплен только за одним местом.' },
     selectorDescription() { return this.waiters.length === 0 ? 'Кнопки появятся, когда в расписании будут доступные места.' : this.canManageSchedule ? 'Менеджер и админ могут закреплять сотрудников, снимать их и редактировать черновик по выбранному месту.' : 'Доступны только места вашей категории. Закрепиться можно только за одним местом.' },
-    workingSchedule() { return this.scheduleRaw.filter((item) => item.is_working === true && item.employee_key) },
+    workingSchedule() { return this.scheduleRaw.filter((item) => this.isVisibleWaiterSlot(item)) },
     waiters() {
       const grouped = new Map()
       this.workingSchedule.forEach((item) => {
@@ -486,6 +498,18 @@ export default {
   methods: {
     updateDeviceMode() {
       this.isHandheldDevice = detectHandheldDevice()
+    },
+    isVisibleWaiterSlot(item) {
+      if (!item || item.is_working !== true) return false
+
+      return Boolean(
+        item.employee_key ||
+        item.waiter_num ||
+        item.grade ||
+        item.assigned_employee_id ||
+        item.assigned_employee_name ||
+        item.employee_label
+      )
     },
     async loadEmployees() {
       if (USE_MOCK_AUTH) return
@@ -734,6 +758,26 @@ export default {
         this.scheduleError = error.message || 'Не удалось добавить место'
       } finally {
         this.isAddingSlot = false
+      }
+    },
+    async handleDeleteSlot() {
+      if (!this.canDeleteScheduleSlot || this.isDeletingSlot || !this.selectedWaiterInfo) return
+      this.isDeletingSlot = true
+      this.scheduleError = ''
+      this.scheduleNotice = ''
+      try {
+        await deleteScheduleSlot({
+          scheduleId: this.currentScheduleId,
+          slotId: this.selectedWaiterInfo.slot_id,
+          slotPositionKey: this.selectedWaiterInfo.slot_position_key,
+          monthDate: this.currentMonth
+        })
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.scheduleNotice = 'Место удалено из черновика.'
+      } catch (error) {
+        this.scheduleError = error.message || 'Не удалось удалить место'
+      } finally {
+        this.isDeletingSlot = false
       }
     },
     async handleNotificationsUpdated() { await this.loadSchedule({ scheduleId: this.currentScheduleId }) },

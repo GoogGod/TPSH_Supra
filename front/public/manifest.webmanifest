@@ -1,0 +1,23 @@
+{
+  "name": "Supra",
+  "short_name": "Supra",
+  "description": "Расписание и управление сменами Supra.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10195d",
+  "theme_color": "#10195d",
+  "icons": [
+    {
+      "src": "/S_height.png",
+      "sizes": "150x150",
+      "type": "image/png"
+    },
+    {
+      "src": "/S_height.png",
+      "sizes": "150x150",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
