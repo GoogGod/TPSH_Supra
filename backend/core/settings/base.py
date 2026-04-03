@@ -3,6 +3,8 @@ from pathlib import Path
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+FRONTEND_DIST_DIR = BASE_DIR / "frontend_dist"
+FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 
 SECRET_KEY = os.getenv(
     'SECRET_KEY',
@@ -102,7 +104,7 @@ TIME_ZONE = "Asia/Vladivostok"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 FRONTEND_STATIC_DIR = BASE_DIR / "frontend_static"
 STATICFILES_DIRS = [FRONTEND_STATIC_DIR] if FRONTEND_STATIC_DIR.exists() else []
