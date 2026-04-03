@@ -1086,12 +1086,36 @@ export default {
     },
     extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
+      const status = Number(error?.response?.status)
 
       if (!data) {
         return error?.message || fallbackMessage
       }
 
       if (typeof data === 'string') {
+        const normalized = data.trim()
+
+        if (/^<!doctype html/i.test(normalized) || /^<html/i.test(normalized)) {
+          const titleMatch = normalized.match(/<title>(.*?)<\/title>/i)
+          const title = titleMatch?.[1]?.trim()
+
+          if (status === 404) {
+            return title
+              ? `Сервер не нашел нужный маршрут: ${title}.`
+              : 'Сервер не нашел нужный маршрут.'
+          }
+
+          if (status === 405) {
+            return title
+              ? `Сервер отклонил метод запроса: ${title}.`
+              : 'Сервер отклонил метод запроса.'
+          }
+
+          return title
+            ? `${fallbackMessage}. ${title}.`
+            : fallbackMessage
+        }
+
         return data
       }
 
@@ -1205,7 +1229,7 @@ export default {
       this.isCreatingVenue = true
 
       try {
-        await api.post('/venues/', this.buildCreateVenuePayload())
+        await api.post('/venues/create/', this.buildCreateVenuePayload())
         this.createVenueSuccess = 'Заведение успешно создано'
         this.createVenueForm = getDefaultCreateVenueForm()
         await this.loadVenues()
