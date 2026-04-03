@@ -148,9 +148,16 @@ select option:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 120px 20px 140px;
+  padding: 40px 20px 140px;
   background: #0c1d49;
   overflow: hidden;
+}
+
+.auth-brand-logo {
+  width: 96px;
+  height: auto;
+  display: block;
+  margin: 0 auto 18px;
 }
 
 .auth-page::before,
@@ -183,15 +190,6 @@ select option:hover {
   background-size: 100% 100%;
   opacity: 0.38;
   z-index: 2;
-}
-
-.top-right-image {
-  position: absolute;
-  top: 18px;
-  left: 18px;
-  width: 118px;
-  height: auto;
-  z-index: 4;
 }
 
 .supra-login-card {
@@ -308,7 +306,7 @@ select option:hover {
 
 @media (max-width: 768px) {
   .auth-page {
-    padding: 110px 18px 120px;
+    padding: 36px 18px 120px;
   }
 
   .supra-login-card {
@@ -320,15 +318,15 @@ select option:hover {
     margin-bottom: 26px;
   }
 
-  .top-right-image {
-    width: 102px;
+  .auth-brand-logo {
+    width: 88px;
   }
 }
 
 @media (max-width: 480px) {
   .auth-page {
     align-items: flex-start;
-    padding: 96px 16px 110px;
+    padding: 32px 16px 110px;
   }
 
   .auth-page::before {
@@ -341,10 +339,8 @@ select option:hover {
     height: 12vh;
   }
 
-  .top-right-image {
-    top: 14px;
-    left: 14px;
-    width: 86px;
+  .auth-brand-logo {
+    width: 76px;
   }
 
   .supra-login-card {

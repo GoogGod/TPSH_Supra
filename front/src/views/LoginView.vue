@@ -1,8 +1,7 @@
 <template>
   <div class="auth-page">
-    <img src="/src/assets/S_height.png" alt="Supra" class="top-right-image" />
-
     <div class="supra-login-card">
+      <img :src="logoSupra" alt="Supra" class="auth-brand-logo" />
       <h1>Авторизация</h1>
 
       <div class="auth-form-container">
@@ -50,6 +49,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
+import logoSupra from '../assets/Logo_supra.png'
 import { loginUser } from '../services/auth'
 
 const router = useRouter()

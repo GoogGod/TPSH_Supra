@@ -19,19 +19,25 @@
       </aside>
     </transition>
 
+    <header class="forecast-header">
+      <div class="forecast-header-actions">
+        <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <img :src="logoSupra" alt="Supra" class="forecast-brand-logo" />
+        <NotificationBell @updated="handleNotificationsUpdated" />
+      </div>
+    </header>
+
     <main class="forecast-content">
       <section class="forecast-card">
         <div class="forecast-card-top">
-          <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
           <div class="forecast-heading">
             <p class="forecast-subtitle">График работы</p>
             <h1 class="forecast-title">Расписание</h1>
           </div>
-          <NotificationBell @updated="handleNotificationsUpdated" />
         </div>
 
         <div class="month-toolbar">
@@ -250,11 +256,45 @@ import '../assets/forecast.css'
 import api from '../api'
 import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
+import logoSupra from '../assets/Logo_supra.png'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { addScheduleSlot, assignScheduleSlot, claimScheduleSlot, deleteScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, unpublishSchedule, updateScheduleEntriesBulk } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
-const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
+const WAITER_COLORS = [
+  '#b98597',
+  '#7898c2',
+  '#6f9b97',
+  '#c08d78',
+  '#9487bb',
+  '#b7aa72',
+  '#7ea88a',
+  '#a98bb3',
+  '#d07c6f',
+  '#5f8fc4',
+  '#4fa38d',
+  '#c79a4d',
+  '#8c7ed1',
+  '#8fa65f',
+  '#6ea6b8',
+  '#c57aa5',
+  '#d18b57',
+  '#5f9d74',
+  '#a47cc9',
+  '#c06767',
+  '#6f88d8',
+  '#4d9fb3',
+  '#b6935d',
+  '#9c86b8',
+  '#cf6f8f',
+  '#729f5d',
+  '#4f7fb0',
+  '#c48f8f',
+  '#8a9fcb',
+  '#70a98e',
+  '#d29a6a',
+  '#7e74b8'
+]
 const SHIFT_LABELS = { morning: 'Утренняя смена', evening: 'Вечерняя смена', full: 'Полный день', off: 'Выходной', shift: 'Произвольная смена' }
 const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
@@ -298,6 +338,7 @@ export default {
   data() {
     return {
       menuOpen: false,
+      logoSupra,
       currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
       currentScheduleId: null,
       currentScheduleStatus: null,
@@ -394,7 +435,11 @@ export default {
     },
     currentWaiterGrade() { if (this.currentUserRole === 'employee_noob' || this.currentUserRole === 'employee_pro') return this.currentUserRole; return String(this.waiters.find((waiter) => waiter.slot_position_key === this.pinnedWaiterKey)?.grade || '').toLowerCase() },
     currentUserAssignedWaiterKey() { return this.waiters.find((waiter) => waiter.claimedByCurrentUser)?.slot_position_key || '' },
-    selectedWaiterEntries() { return this.scheduleRaw.filter((item) => (item.slot_position_key || item.employee_key) === this.selectedWaiter).sort((left, right) => String(left.date).localeCompare(String(right.date))) },
+    selectedWaiterEntries() {
+      return this.scheduleRaw
+        .filter((item) => (item.slot_position_key || item.employee_key) === this.selectedWaiter && item.date)
+        .sort((left, right) => String(left.date).localeCompare(String(right.date)))
+    },
     selectedWaiterEntriesMap() { return this.selectedWaiterEntries.reduce((accumulator, item) => { accumulator[item.date] = item; return accumulator }, {}) },
     selectedWaiterScheduleMap() { return this.selectedWaiterEntries.reduce((accumulator, item) => { if (item.is_working) accumulator[item.date] = item; return accumulator }, {}) },
     openSlotsMap() { return this.scheduleRaw.reduce((accumulator, item) => { if (item.date && item.is_working === true && !item.employee_key) accumulator[item.date] = true; return accumulator }, {}) },
@@ -500,9 +545,10 @@ export default {
       this.isHandheldDevice = detectHandheldDevice()
     },
     isVisibleWaiterSlot(item) {
-      if (!item || item.is_working !== true) return false
+      if (!item) return false
 
       return Boolean(
+        item.is_slot_placeholder ||
         item.employee_key ||
         item.waiter_num ||
         item.grade ||
