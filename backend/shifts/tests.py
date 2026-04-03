@@ -124,6 +124,38 @@ class ShiftsApiTests(APITestCase):
         self.assertEqual(slot_1.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_PRO)
         self.assertEqual(slot_2.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_NOOB)
 
+    def test_slot_level_supports_specialist_novice_and_float_codes(self):
+        csv_content = """date,waiter_id,waiter_num,waiter_type,waiter_type_code,waiter_capacity,shift_type_code,shift_type,work_hours,waiters_needed
+2026-04-01,Waiter 1,1,specialist,1.0,10,1,full,12,4
+2026-04-01,Waiter 2,2,novice,2.0,5,0,off,0,4
+"""
+        schedule = parse_schedule_csv(csv_content, self.venue)
+
+        slot_1 = schedule.slots.get(waiter_num=1)
+        slot_2 = schedule.slots.get(waiter_num=2)
+
+        self.assertEqual(slot_1.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_PRO)
+        self.assertEqual(slot_2.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_NOOB)
+
+    def test_scheduler_profile_does_not_force_ratio_on_single_role(self):
+        only_pro_venue = Venue.objects.create(
+            name="Only Pro Venue",
+            address="Test",
+            timezone="Europe/Moscow",
+        )
+        User.objects.create_user(
+            username="only_pro_1",
+            email="only_pro_1@example.com",
+            password=self.password,
+            first_name="Pro",
+            last_name="One",
+            role=User.Role.EMPLOYEE_PRO,
+            venue=only_pro_venue,
+        )
+
+        profile = GenerateMonthlyScheduleView._build_scheduler_profile(only_pro_venue)
+        self.assertIsNone(profile["noob_ratio"])
+
     def test_admin_can_create_venue(self):
         self.client.force_authenticate(user=self.admin)
         response = self.client.post(

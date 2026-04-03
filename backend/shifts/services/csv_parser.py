@@ -36,6 +36,9 @@ COLUMN_ALIASES = {
     "hours": "work_hours",
     "waiter_type": "waiter_type",
     "waiter_type_code": "waiter_type_code",
+    "waiter_level": "waiter_type",
+    "employee_level": "waiter_type",
+    "waiter_capacity": "waiter_capacity",
 }
 
 
@@ -176,7 +179,11 @@ def _parse_row(row):
 
     work_start = _parse_time(row.get("work_start", ""))
     work_end = _parse_time(row.get("work_end", ""))
-    employee_level = _parse_waiter_level(row.get("waiter_type"), row.get("waiter_type_code"))
+    employee_level = _parse_waiter_level(
+        waiter_type=row.get("waiter_type"),
+        waiter_type_code=row.get("waiter_type_code"),
+        waiter_capacity=row.get("waiter_capacity"),
+    )
 
     return {
         "date": date,
@@ -257,18 +264,58 @@ def _parse_bool(value):
         return False
 
 
-def _parse_waiter_level(waiter_type, waiter_type_code):
+def _parse_waiter_level(*, waiter_type, waiter_type_code, waiter_capacity=None):
     type_raw = str(waiter_type or "").strip().lower()
     code_raw = str(waiter_type_code or "").strip().lower()
 
-    if type_raw in {"employee_pro", "pro", "professional", "профессионал", "опытный"}:
+    if type_raw in {
+        "employee_pro",
+        "pro",
+        "professional",
+        "specialist",
+        "профессионал",
+        "специалист",
+        "опытный",
+    }:
         return "employee_pro"
-    if type_raw in {"employee_noob", "noob", "novice", "новичок", "стажер", "стажёр"}:
+    if type_raw in {
+        "employee_noob",
+        "noob",
+        "novice",
+        "intern",
+        "trainee",
+        "новичок",
+        "стажер",
+        "стажёр",
+    }:
         return "employee_noob"
 
-    if code_raw in {"1", "pro", "p"}:
+    if code_raw in {"pro", "p"}:
         return "employee_pro"
-    if code_raw in {"2", "noob", "n"}:
+    if code_raw in {"noob", "n"}:
         return "employee_noob"
+
+    # Поддержка "1.0"/"2.0"
+    try:
+        code_num = int(float(code_raw))
+    except (TypeError, ValueError):
+        code_num = None
+
+    if code_num == 1:
+        return "employee_pro"
+    if code_num == 2:
+        return "employee_noob"
+
+    # Резерв для форматов без waiter_type_code: по capacity.
+    try:
+        capacity_num = float(str(waiter_capacity or "").strip())
+    except (TypeError, ValueError):
+        capacity_num = None
+
+    if capacity_num is not None:
+        if capacity_num >= 9:
+            return "employee_pro"
+        if 0 < capacity_num <= 6:
+            return "employee_noob"
 
     return None

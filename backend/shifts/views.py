@@ -994,7 +994,8 @@ class GenerateMonthlyScheduleView(APIView):
     def _build_scheduler_profile(venue):
         """
         Подготовить профиль для scheduler из фактического состава venue.
-        Новый scheduler использует долю noob, а не waiter_config по каждому номеру.
+        Важно: если состав сотрудников неполный/перекошенный (например, только pro),
+        не навязываем noob_ratio в генератор — иначе он создаст 100% одного типа.
         """
         from users.models import User
 
@@ -1006,8 +1007,14 @@ class GenerateMonthlyScheduleView(APIView):
 
         total_staff = staff_qs.count()
         noob_count = staff_qs.filter(role=User.Role.EMPLOYEE_NOOB).count()
-        noob_ratio = (noob_count / total_staff) if total_staff else 0.5
-        noob_ratio = max(0.0, min(1.0, noob_ratio))
+        pro_count = staff_qs.filter(role=User.Role.EMPLOYEE_PRO).count()
+
+        # Если нет обеих категорий, используем внутренний default генератора (None).
+        # Это предотвращает ситуацию "все employee_pro" из-за noob_ratio=0.0.
+        noob_ratio = None
+        if total_staff > 0 and noob_count > 0 and pro_count > 0:
+            noob_ratio = noob_count / total_staff
+            noob_ratio = max(0.0, min(1.0, noob_ratio))
 
         return {
             "total_staff": total_staff,
@@ -1064,7 +1071,7 @@ class GenerateMonthlyScheduleView(APIView):
         *,
         forecast_csv_path: Path,
         schedule_csv_path: Path,
-        noob_ratio: float,
+        noob_ratio: float | None,
     ):
         """
         Если main.py не создал waiter_schedule.csv, пробуем построить напрямую через scheduler.
@@ -1087,25 +1094,31 @@ class GenerateMonthlyScheduleView(APIView):
 
         schedule_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-        attempts = [
-            (noob_ratio, 200),
-            (noob_ratio, 160),
-            (noob_ratio, 120),
-            (0.5, 120),
-            (0.5, 80),
-            (0.5, 40),
-            (0.5, 0),
-        ]
+        ratio_attempts = [noob_ratio] if noob_ratio is not None else []
+        ratio_attempts += [0.5, 0.4, 0.3]
+        seen = set()
+        ordered_ratio_attempts = []
+        for ratio in ratio_attempts:
+            if ratio in seen:
+                continue
+            seen.add(ratio)
+            ordered_ratio_attempts.append(ratio)
 
-        for ratio, min_hours in attempts:
-            schedule_df, _ = create_waiter_schedule(
-                forecast_path=str(forecast_csv_path),
-                output_path=str(schedule_csv_path),
-                min_hours_per_waiter=int(min_hours),
-                best_effort=True,
-                noob_ratio=float(ratio),
-                verbose=False,
-            )
+        hour_attempts = [200, 160, 120, 80, 40, 0]
+
+        for ratio in ordered_ratio_attempts:
+            for min_hours in hour_attempts:
+                kwargs = {
+                    "forecast_path": str(forecast_csv_path),
+                    "output_path": str(schedule_csv_path),
+                    "min_hours_per_waiter": int(min_hours),
+                    "best_effort": True,
+                    "verbose": False,
+                }
+                if ratio is not None:
+                    kwargs["noob_ratio"] = float(ratio)
+
+                schedule_df, _ = create_waiter_schedule(**kwargs)
             if GenerateMonthlyScheduleView._has_working_shifts(schedule_df):
                 if not schedule_csv_path.exists() or schedule_csv_path.stat().st_size == 0:
                     raise FileNotFoundError(f"Файл расписания не создан: {schedule_csv_path}")
