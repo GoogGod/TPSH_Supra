@@ -21,11 +21,11 @@ incremental_training (тип: bool, по умолчанию: False)
 model_type (тип: str, по умолчанию: xgboost)
 Тип модели для обучения. Доступные значения: xgboost, random_forest, gradient_boosting.
 
-num_waiters (тип: int, по умолчанию: 10)
-Количество официантов для планирования смен.
+min_hours_per_waiter (тип: int, по умолчанию: 200)
+Минимальная норма часов работы на одного официанта в месяц. Система автоматически масштабирует норму по количеству месяцев в прогнозе (например, 200ч/мес × 3мес = 600ч).
 
-waiter_config (тип: dict, по умолчанию: None)
-Конфигурация типов официантов. Словарь вида {номер: тип}, где тип может быть specialist (10 гостей/час) или novice (5 гостей/час).
+novice_ratio (тип: float, по умолчанию: 0.5)
+Доля новичков среди официантов (от 0.0 до 1.0). Например, 0.5 означает 50% новичков и 50% специалистов. Система автоматически распределяет типы официантов.
 
 from_date (тип: str или datetime, по умолчанию: None)
 Дата начала прогноза в формате ГГГГ-ММ-ДД. Если указана, прогноз начинается с этой даты. Если None, прогноз начинается со следующего часа после последней записи в исторических данных.
@@ -46,7 +46,7 @@ force_fresh_weather (тип: bool, по умолчанию: True)
 
 Обработанные данные
 Путь: data/processed/processed_orders.csv
-Содержание: Агрегированные данные по часам (datetime, orders_count, guests_count, checks_count, avg_guests_per_check) и погодные данные (temperature_mean, precipitation, is_rainy, is_extreme_weather и другие).
+Содержание: Агрегированные данные по часам (datetime, orders_count, guests_count, checks_count, avg_guests_per_check) и погодные данные (temperature_mean, precipitation, is_rainy, is_extreme_weather, weather_source и другие).
 
 Обученная модель
 Путь: models/model_orders.pkl
@@ -54,25 +54,24 @@ force_fresh_weather (тип: bool, по умолчанию: True)
 
 Прогноз
 Путь: data/predicted/forecast.csv
-Содержание: Почасовой прогноз на указанный период с колонками: datetime, hour, day_of_week, is_peak_hour, is_weekend, is_holiday, orders_predicted, orders_with_buffer, guests_predicted, guests_with_buffer.
+Содержание: Почасовой прогноз на указанный период с колонками: datetime, hour, day_of_week, is_peak_hour, is_weekend, is_holiday, orders_predicted, orders_with_buffer, guests_predicted, guests_with_buffer. Прогноз включает сезонную корректировку для месяцев без истории.
 
 Расписание официантов
 Путь: data/predicted/waiter_schedule.csv
-Содержание: Расписание для каждого официанта с колонками: date, waiter_id, waiter_num, waiter_type, shift_type, work_start, work_end, work_hours.
+Содержание: Расписание для каждого официанта с колонками: date, waiter_id, waiter_num, waiter_type, waiter_type_code, waiter_capacity, shift_type_code, shift_type, work_start, work_end, work_hours, guests_predicted.
 
 СТРУКТУРА ПРОГНОЗА В CSV
 
-forecast_datetime — дата и время прогноза (например, 2026-04-01 12:00:00)
-date — дата без времени (например, 2026-04-01)
+datetime — дата и время прогноза (например, 2026-04-01 12:00:00)
 hour — час суток (0-23)
 day_of_week — день недели (0=понедельник, 6=воскресенье)
 is_peak_hour — флаг пикового часа (1=обед 12-14 или ужин 18-21, 0=обычный час)
 is_weekend — флаг выходного дня (1=суббота или воскресенье, 0=будний)
 is_holiday — флаг праздника (1=праздник, 0=обычный день)
-orders_predicted — прогнозируемое количество заказов
-orders_with_buffer — прогнозируемое количество заказов с буфером +25%
-guests_predicted — прогнозируемое количество гостей
-guests_with_buffer — прогнозируемое количество гостей с буфером +25%
+orders_predicted — прогнозируемое количество заказов (с учётом сезонности)
+orders_with_buffer — прогнозируемое количество заказов с буфером +50% и сезонной корректировкой
+guests_predicted — прогнозируемое количество гостей (с учётом сезонности)
+guests_with_buffer — прогнозируемое количество гостей с буфером +50% и сезонной корректировкой
 
 СТРУКТУРА РАСПИСАНИЯ ОФИЦИАНТОВ
 
@@ -80,11 +79,14 @@ date — дата смены
 waiter_id — идентификатор официанта (например, Официант 1)
 waiter_num — номер официанта (1, 2, 3...)
 waiter_type — тип официанта (Специалист или Новичок)
+waiter_type_code — код типа официанта (1=Специалист, 2=Новичок)
 waiter_capacity — вместимость официанта (10 или 5 гостей/час)
+shift_type_code — код типа смены (1=Полная, 2=Утренняя, 3=Вечерняя, 0=Выходной)
 shift_type — тип смены (Полная, Утренняя, Вечерняя, Выходной)
 work_start — начало смены (10, 16 или None)
 work_end — конец смены (22, 25 или None, где 25=01:00 следующего дня)
 work_hours — продолжительность смены в часах (12, 6, 9 или 0)
+guests_predicted — прогнозируемое количество гостей в этот день
 
 КАК ОБУЧИТЬ МОДЕЛЬ И ПОЛУЧИТЬ РАСПИСАНИЕ
 
@@ -95,3 +97,6 @@ work_hours — продолжительность смены в часах (12, 
 5) Получить результаты:
     data/predicted/forecast.csv — прогноз заказов и гостей
     data/predicted/waiter_schedule.csv — расписание смен официантов
+
+Адаптивная норма часов
+Норма часов работы масштабируется по количеству месяцев в прогнозе (например, 200ч/мес × 7мес = 1400ч). Если нагрузка не позволяет набрать норму, система адаптирует требование и работает в режиме best effort.
