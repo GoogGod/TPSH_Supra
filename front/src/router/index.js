@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import CabinetView from '../views/CabinetView.vue'
 import ForeCastView from '../views/ForeCastView.vue'
+import NotFoundView from '../views/NotFoundView.vue'
 import { isAuthenticated } from '../services/auth'
 
 const routes = [
@@ -32,6 +33,11 @@ const routes = [
   {
     path: '/',
     redirect: '/login'
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: NotFoundView
   }
 ]
 

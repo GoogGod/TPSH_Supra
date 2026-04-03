@@ -1,4 +1,5 @@
-from django.http import HttpResponse
+from django.db import connection
+from django.http import HttpResponse, JsonResponse
 from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 from django.views.generic import View
@@ -19,3 +20,18 @@ class FrontendAppView(View):
                 status=503,
             )
         return HttpResponse(template.render({}, request))
+
+
+class HealthCheckView(View):
+    """
+    Basic liveness + database readiness check.
+    """
+
+    def get(self, request, *args, **kwargs):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+        except Exception as exc:
+            return JsonResponse({"status": "error", "detail": str(exc)}, status=503)
+        return JsonResponse({"status": "ok"}, status=200)

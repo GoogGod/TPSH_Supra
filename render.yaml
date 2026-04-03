@@ -5,7 +5,7 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     plan: free
-    healthCheckPath: /api/v1/docs/
+    healthCheckPath: /api/v1/healthz/
     disk:
       name: supra-ml-data
       mountPath: /var/data
@@ -15,6 +15,8 @@ services:
         value: production
       - key: ML_DATA_DIR
         value: /var/data/ml_data
+      - key: DJANGO_DB_PATH
+        value: /var/data/db.sqlite3
       - key: ALLOWED_HOSTS
         value: tpsh-supra-k1v6.onrender.com,tpsh-supra.onrender.com
       - key: CORS_ORIGINS
@@ -23,13 +25,11 @@ services:
         value: 480
       - key: JWT_REFRESH_TOKEN_DAYS
         value: 30
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: admin
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: admin@example.com
+      - key: DJANGO_SUPERUSER_PASSWORD
+        generateValue: true
       - key: SECRET_KEY
         generateValue: true
-      - key: DATABASE_URL
-        fromDatabase:
-          name: supra-postgres
-          property: connectionString
-
-databases:
-  - name: supra-postgres
-    plan: free

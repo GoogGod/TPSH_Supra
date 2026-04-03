@@ -11,7 +11,7 @@ from rest_framework_simplejwt.views import (
 )
 from users.views import MeView
 from users.urls import user_urlpatterns
-from .views import FrontendAppView
+from .views import FrontendAppView, HealthCheckView
 
 urlpatterns = [
     # Django Admin
@@ -38,6 +38,7 @@ urlpatterns = [
     # Docs
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/v1/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
+    path("api/v1/healthz/", HealthCheckView.as_view(), name="healthz"),
 
     # Frontend SPA (must be last)
     re_path(r"^(?!api/|admin/|static/).*$", FrontendAppView.as_view(), name="frontend-app"),
