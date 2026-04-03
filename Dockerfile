@@ -53,6 +53,7 @@ WORKDIR /app/backend
 CMD sh -c "ML_ROOT=${ML_DATA_DIR:-/app/ml_data} && \
            mkdir -p ${ML_ROOT}/data/raw ${ML_ROOT}/data/processed ${ML_ROOT}/data/predicted ${ML_ROOT}/models && \
            python manage.py migrate --noinput && \
+           python manage.py ensure_superuser && \
            python manage.py collectstatic --noinput && \
            gunicorn core.wsgi:application \
              --bind 0.0.0.0:${PORT:-8000} \
