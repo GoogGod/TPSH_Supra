@@ -9,11 +9,13 @@ from src.config import (
     RAW_EXCEL_FILE, RAW_DATA_FILE,
     MODEL_FILE, DATA_PRED_DIR, MIN_WAITERS_ABSOLUTE, DATA_RAW_NEW_DIR
 )
+from datetime import timedelta
+from scheduler import create_waiter_schedule
 from pathlib import Path
 from typing import Optional, Union
 from datetime import datetime
+import pandas as pd
 import os
-
 
 def main(
     process_data: bool = True,
@@ -159,9 +161,9 @@ def main(
 
     if make_schedule and forecast is not None:
         print("\nПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
-        
+
         from scheduler import create_waiter_schedule
-        
+
         schedule_df, schedule_stats = create_waiter_schedule(
             forecast_path=f'{DATA_PRED_DIR}/forecast.csv',
             output_path=f'{DATA_PRED_DIR}/waiter_schedule.csv',
@@ -170,11 +172,6 @@ def main(
             novice_ratio=novice_ratio,
             verbose=verbose
         )
-        
-        # Обновляем итоговую статистику для вывода
-        if schedule_stats and 'num_waiters' in schedule_stats:
-            # Сохраняем в stats для итогового отчёта
-            schedule_stats['num_waiters_reported'] = schedule_stats['num_waiters']
     else:
         print("\nПропускаем планирование смен")
         schedule_df = None
@@ -255,5 +252,5 @@ if __name__ == '__main__':
         verbose=True,
         force_fresh_weather=True,
         from_date='2026-05-01',
-        to_date='2026-06-01'
+        to_date='2026-09-01'
     )
