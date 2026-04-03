@@ -1,3 +1,233 @@
-from django.test import TestCase
+from datetime import date
 
-# Create your tests here.
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from shifts.models import MonthlySchedule, ScheduleEntry, Venue, WaiterSlot
+from shifts.services.csv_parser import parse_schedule_csv
+from shifts.views import GenerateMonthlyScheduleView
+from users.models import User
+
+
+class ShiftsApiTests(APITestCase):
+    def setUp(self):
+        self.password = "StrongPass123!"
+        self.venue = Venue.objects.create(
+            name="Ресторан Центральный",
+            address="ул. Ленина, 1",
+            timezone="Europe/Moscow",
+        )
+        self.manager = User.objects.create_user(
+            username="manager_slots",
+            email="manager_slots@example.com",
+            password=self.password,
+            first_name="Мария",
+            last_name="Иванова",
+            role=User.Role.MANAGER,
+            venue=self.venue,
+        )
+        self.employee_pro = User.objects.create_user(
+            username="pro_user",
+            email="pro_user@example.com",
+            password=self.password,
+            first_name="Ирина",
+            last_name="Петрова",
+            role=User.Role.EMPLOYEE_PRO,
+            venue=self.venue,
+        )
+        self.employee_noob = User.objects.create_user(
+            username="noob_user",
+            email="noob_user@example.com",
+            password=self.password,
+            first_name="Олег",
+            last_name="Смирнов",
+            role=User.Role.EMPLOYEE_NOOB,
+            venue=self.venue,
+        )
+        self.admin = User.objects.create_user(
+            username="admin_slots",
+            email="admin_slots@example.com",
+            password=self.password,
+            first_name="Анна",
+            last_name="Админова",
+            role=User.Role.ADMIN,
+        )
+
+    def test_schedule_detail_contains_employee_role_flags_from_slot_level(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=4,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+
+        slot_pro = WaiterSlot.objects.create(
+            schedule=schedule,
+            waiter_num=1,
+            employee_level=WaiterSlot.EmployeeLevel.EMPLOYEE_PRO,
+            assigned_employee=self.employee_noob,
+            assignment_status=WaiterSlot.AssignmentStatus.CONFIRMED,
+        )
+        slot_noob = WaiterSlot.objects.create(
+            schedule=schedule,
+            waiter_num=2,
+            employee_level=WaiterSlot.EmployeeLevel.EMPLOYEE_NOOB,
+            assigned_employee=self.employee_pro,
+            assignment_status=WaiterSlot.AssignmentStatus.PENDING,
+        )
+        slot_open = WaiterSlot.objects.create(
+            schedule=schedule,
+            waiter_num=3,
+            assignment_status=WaiterSlot.AssignmentStatus.OPEN,
+        )
+
+        for slot in (slot_pro, slot_noob, slot_open):
+            ScheduleEntry.objects.create(
+                slot=slot,
+                date=date(2026, 4, 1),
+                is_working=False,
+                shift_type=ScheduleEntry.ShiftType.OFF,
+                waiters_needed=0,
+                work_hours=0,
+            )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.get(reverse("schedule-detail", args=[schedule.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        slots = response.data["slots"]
+        self.assertEqual(len(slots), 3)
+
+        by_num = {slot["waiter_num"]: slot for slot in slots}
+        self.assertEqual(by_num[1]["employee_role"], User.Role.EMPLOYEE_PRO)
+        self.assertTrue(by_num[1]["employee_pro"])
+        self.assertFalse(by_num[1]["employee_noob"])
+        self.assertEqual(by_num[2]["employee_role"], User.Role.EMPLOYEE_NOOB)
+        self.assertFalse(by_num[2]["employee_pro"])
+        self.assertTrue(by_num[2]["employee_noob"])
+        self.assertIsNone(by_num[3]["employee_role"])
+        self.assertFalse(by_num[3]["employee_pro"])
+        self.assertFalse(by_num[3]["employee_noob"])
+
+    def test_slot_level_is_loaded_from_generated_csv(self):
+        csv_content = """date,waiter_id,waiter_num,waiter_type,waiter_type_code,shift_type_code,shift_type,work_start,work_end,work_hours,waiters_needed
+2026-04-01,Официант 1,1,Профессионал,1,1,Полная,10.0,22.0,12,4
+2026-04-01,Официант 2,2,Новичок,2,2,Утренняя,10.0,16.0,6,4
+"""
+        schedule = parse_schedule_csv(csv_content, self.venue)
+
+        slot_1 = schedule.slots.get(waiter_num=1)
+        slot_2 = schedule.slots.get(waiter_num=2)
+
+        self.assertEqual(slot_1.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_PRO)
+        self.assertEqual(slot_2.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_NOOB)
+
+    def test_admin_can_create_venue(self):
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post(
+            reverse("venue-create"),
+            {
+                "name": "Ресторан Северный",
+                "address": "ул. Набережная, 10",
+                "timezone": "Europe/Moscow",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["name"], "Ресторан Северный")
+        self.assertTrue(Venue.objects.filter(name="Ресторан Северный").exists())
+
+    def test_manager_can_bulk_update_draft_schedule_entries(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=4,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        slot = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        entry = ScheduleEntry.objects.create(
+            slot=slot,
+            date=date(2026, 4, 2),
+            is_working=False,
+            shift_type=ScheduleEntry.ShiftType.OFF,
+            waiters_needed=1,
+            work_hours=0,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.patch(
+            reverse("schedule-entries-bulk-update", args=[schedule.id]),
+            {
+                "updates": [
+                    {
+                        "id": entry.id,
+                        "is_working": True,
+                        "shift_type": ScheduleEntry.ShiftType.FULL,
+                        "waiters_needed": 3,
+                        "work_start": "10:00:00",
+                        "work_end": "22:00:00",
+                        "work_hours": "12.0",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        entry.refresh_from_db()
+        self.assertTrue(entry.is_working)
+        self.assertEqual(entry.shift_type, ScheduleEntry.ShiftType.FULL)
+        self.assertEqual(entry.waiters_needed, 3)
+
+    def test_staff_shortage_metrics_are_calculated(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=4,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        slot_1 = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        slot_2 = WaiterSlot.objects.create(schedule=schedule, waiter_num=2)
+
+        ScheduleEntry.objects.create(
+            slot=slot_1,
+            date=date(2026, 4, 1),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=4,
+            work_hours=12,
+        )
+        ScheduleEntry.objects.create(
+            slot=slot_2,
+            date=date(2026, 4, 1),
+            is_working=False,
+            shift_type=ScheduleEntry.ShiftType.OFF,
+            waiters_needed=4,
+            work_hours=0,
+        )
+        ScheduleEntry.objects.create(
+            slot=slot_1,
+            date=date(2026, 4, 2),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=2,
+            work_hours=12,
+        )
+        ScheduleEntry.objects.create(
+            slot=slot_2,
+            date=date(2026, 4, 2),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=2,
+            work_hours=12,
+        )
+
+        metrics = GenerateMonthlyScheduleView._calculate_staff_shortage(schedule)
+        self.assertEqual(metrics["available_staff"], 2)
+        self.assertEqual(metrics["required_waiters_peak"], 4)
+        self.assertEqual(metrics["lack_staff_peak"], 2)
+        self.assertEqual(metrics["days_with_shortage"], 1)
+        self.assertEqual(metrics["shortage_person_days"], 3)

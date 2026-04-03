@@ -1,10 +1,10 @@
 from django.conf import settings
 from django.db import models
+
 from common.mixins import TimestampMixin
 
 
 class Venue(TimestampMixin):
-    """Без изменений — как было."""
     name = models.CharField(max_length=255, verbose_name="Название")
     address = models.CharField(max_length=500, blank=True, default="", verbose_name="Адрес")
     timezone = models.CharField(max_length=63, default="Europe/Moscow", verbose_name="Часовой пояс")
@@ -20,16 +20,7 @@ class Venue(TimestampMixin):
         return self.name
 
 
-# ═══════════════════ НОВЫЕ МОДЕЛИ ═══════════════════
-
-
 class MonthlySchedule(TimestampMixin):
-    """
-    Расписание на месяц для одного заведения.
-    Создаётся при загрузке CSV от OR-Tools.
-    Проходит путь: draft → published.
-    """
-
     class Status(models.TextChoices):
         DRAFT = "draft", "Черновик"
         PUBLISHED = "published", "Опубликовано"
@@ -41,7 +32,7 @@ class MonthlySchedule(TimestampMixin):
         verbose_name="Объект",
     )
     year = models.PositiveIntegerField(verbose_name="Год")
-    month = models.PositiveIntegerField(verbose_name="Месяц")  # 1–12
+    month = models.PositiveIntegerField(verbose_name="Месяц")
 
     status = models.CharField(
         max_length=10,
@@ -79,16 +70,14 @@ class MonthlySchedule(TimestampMixin):
 
 
 class WaiterSlot(TimestampMixin):
-    """
-    Позиция «Официант N» в месячном расписании.
-    Сотрудник занимает (claim) или назначается (assign) менеджером.
-    Один слот = одна роль на весь месяц (все рабочие дни по паттерну).
-    """
-
     class AssignmentStatus(models.TextChoices):
         OPEN = "open", "Свободно"
         PENDING = "pending", "Ожидает подтверждения"
         CONFIRMED = "confirmed", "Подтверждено"
+
+    class EmployeeLevel(models.TextChoices):
+        EMPLOYEE_PRO = "employee_pro", "Опытный"
+        EMPLOYEE_NOOB = "employee_noob", "Стажёр"
 
     schedule = models.ForeignKey(
         MonthlySchedule,
@@ -97,6 +86,15 @@ class WaiterSlot(TimestampMixin):
         verbose_name="Расписание",
     )
     waiter_num = models.PositiveIntegerField(verbose_name="Номер официанта")
+    employee_level = models.CharField(
+        max_length=20,
+        choices=EmployeeLevel.choices,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="Уровень слота",
+        help_text="Тип официанта из сгенерированного расписания (employee_pro/employee_noob)",
+    )
 
     assigned_employee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -128,16 +126,11 @@ class WaiterSlot(TimestampMixin):
 
 
 class ScheduleEntry(TimestampMixin):
-    """
-    Одна строка расписания: один день для одного слота.
-    Данные берутся из CSV от OR-Tools.
-    """
-
     class ShiftType(models.TextChoices):
         OFF = "off", "Выходной"
-        FULL = "full", "Полная"          # ~09:00–23:00
-        MORNING = "morning", "Утренняя"  # ~09:00–17:00
-        EVENING = "evening", "Вечерняя"  # ~17:00–01:00
+        FULL = "full", "Полная"
+        MORNING = "morning", "Утренняя"
+        EVENING = "evening", "Вечерняя"
 
     slot = models.ForeignKey(
         WaiterSlot,

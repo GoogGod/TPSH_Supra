@@ -34,6 +34,8 @@ COLUMN_ALIASES = {
     "start": "work_start",
     "end": "work_end",
     "hours": "work_hours",
+    "waiter_type": "waiter_type",
+    "waiter_type_code": "waiter_type_code",
 }
 
 
@@ -122,9 +124,18 @@ def parse_schedule_csv(csv_file, venue):
         waiter_nums = sorted(set(r["waiter_num"] for r in rows))
         slots = {}
         for num in waiter_nums:
+            level = next(
+                (
+                    r.get("employee_level")
+                    for r in rows
+                    if r["waiter_num"] == num and r.get("employee_level") is not None
+                ),
+                None,
+            )
             slot = WaiterSlot.objects.create(
                 schedule=schedule,
                 waiter_num=num,
+                employee_level=level,
             )
             slots[num] = slot
 
@@ -165,10 +176,12 @@ def _parse_row(row):
 
     work_start = _parse_time(row.get("work_start", ""))
     work_end = _parse_time(row.get("work_end", ""))
+    employee_level = _parse_waiter_level(row.get("waiter_type"), row.get("waiter_type_code"))
 
     return {
         "date": date,
         "waiter_num": waiter_num,
+        "employee_level": employee_level,
         "is_working": is_working,
         "shift_type": shift_type,
         "waiters_needed": waiters_needed,
@@ -242,3 +255,20 @@ def _parse_bool(value):
         return bool(int(float(value_str)))
     except (ValueError, TypeError):
         return False
+
+
+def _parse_waiter_level(waiter_type, waiter_type_code):
+    type_raw = str(waiter_type or "").strip().lower()
+    code_raw = str(waiter_type_code or "").strip().lower()
+
+    if type_raw in {"pro", "professional", "профессионал", "опытный"}:
+        return "employee_pro"
+    if type_raw in {"noob", "noob", "новичок", "стажер", "стажёр"}:
+        return "employee_noob"
+
+    if code_raw in {"1", "pro", "p"}:
+        return "employee_pro"
+    if code_raw in {"2", "noob", "n"}:
+        return "employee_noob"
+
+    return None

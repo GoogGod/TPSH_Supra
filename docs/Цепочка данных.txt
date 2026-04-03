@@ -1,28 +1,47 @@
-1. Загрузка сырых данных
-   POST /forecast/upload-data/  →  ml_data/data/raw/real_orders.csv
+﻿ЦЕПОЧКА ДАННЫХ (актуально)
 
-2. ML-пайплайн
-   POST /forecast/run/
-   → process_data: raw CSV/Excel → processed_orders.csv
-   → train_model: обучение XGBoost → model_orders.pkl
-   → make_forecast: прогноз → forecast.csv → БД (HourlyForecast)
-   → evaluate: метрики → ForecastRun
+1) RAW ДАННЫЕ
+- Источник: файл от бизнеса (.csv/.xlsx)
+- Endpoint: POST /api/v1/forecast/upload-data/
+- Результат: сохранение в ml_data/data/raw/real_orders.csv|xlsx
 
-3. Просмотр прогноза
-   GET /forecast/daily/?venue=1  →  агрегированный прогноз по дням
+2) ОБУЧЕНИЕ/ПРОГНОЗ (ML)
+- Endpoint: POST /api/v1/forecast/run/
+- Для Admin доступно:
+  process_data -> train_model -> make_forecast -> evaluate
+- Для Manager: только make_forecast на готовой модели
 
-4. Генерация расписания
-   POST /forecast/generate-schedule/
-   → scheduler.py: forecast.csv → waiter_schedule.csv (OR-Tools)
-   → csv_parser: waiter_schedule.csv → MonthlySchedule (draft)
+3) ПАПКИ АРТЕФАКТОВ ПРОГНОЗА
+- На каждый запуск создается изолированная папка:
+  ml_data/data/predicted/runs/venue_<venue_id>/run_<run_id>/
+- Минимум артефактов:
+  - forecast.csv
+  - waiter_schedule.csv (если генерировалось расписание)
 
-5. Публикация
-   POST /schedule/monthly/{id}/publish/
-   → уведомление всем сотрудникам venue
+4) ЗАГРУЗКА ПРОГНОЗА В БД
+- hourly forecast загружается в таблицу HourlyForecast
+- Доступ к просмотру:
+  - GET /api/v1/forecast/hourly/
+  - GET /api/v1/forecast/daily/
 
-6. Заполнение позиций
-   POST /schedule/slots/{id}/claim/      ← сотрудник сам
-   POST /schedule/slots/{id}/assign/     ← менеджер назначает (+ подтверждение)
+5) ГЕНЕРАЦИЯ РАСПИСАНИЯ
+- Endpoint: POST /api/v1/schedule/generate/
+- Внутри:
+  a) запуск ML прогноза
+  b) запуск planner/scheduler
+  c) parse waiter_schedule.csv -> MonthlySchedule/WaiterSlot/ScheduleEntry
+- Результат: черновик расписания на указанный month/year
 
-7. Напоминания
-   manage.py send_schedule_reminders     ← cron, последняя неделя месяца
+6) РЕДАКТИРОВАНИЕ И ПУБЛИКАЦИЯ
+- PATCH /api/v1/schedule/monthly/{id}/entries/bulk-update/ (только draft)
+- POST /api/v1/schedule/monthly/{id}/publish/
+
+7) ПОТРЕБЛЕНИЕ ФРОНТОМ
+- Статус наличия: GET /api/v1/schedule/status/
+- Список: GET /api/v1/schedule/monthly/
+- Детали: GET /api/v1/schedule/monthly/{id}/
+- Действия сотрудника: claim/confirm/reject через slots/notifications endpoints
+
+8) ВАЖНО ПО ИЗОЛЯЦИИ
+- Расчеты одного venue не должны перезаписывать данные другого.
+- Для этого используется run-структура по venue/run и привязка ForecastRun -> venue.

@@ -45,9 +45,11 @@
   padding: 18px 14px 0;
 }
 
-.menu-container {
+.cabinet-header-actions {
   display: flex;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .menu-button {
@@ -153,23 +155,24 @@
   gap: 12px;
 }
 
-.notifications-card {
+.data-upload-card {
   margin-top: 18px;
   padding: 18px 16px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 14px;
 }
 
-.notifications-head {
+.data-upload-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
 }
 
-.notifications-subtitle {
+.data-upload-subtitle {
   margin: 0 0 4px;
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -177,68 +180,16 @@
   color: rgba(255, 255, 255, 0.62);
 }
 
-.notifications-title {
+.data-upload-title {
   margin: 0;
   color: #ffffff;
   font-size: 22px;
 }
 
-.notifications-count {
-  min-width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(73, 209, 125, 0.16);
-  border: 1px solid rgba(73, 209, 125, 0.3);
-  color: #d8ffe6;
-  font-weight: 700;
-}
-
-.notifications-empty {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.notifications-list {
-  display: grid;
-  gap: 12px;
-}
-
-.notification-item {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.notification-copy strong {
-  display: block;
-  margin-bottom: 6px;
-  color: #ffffff;
-}
-
-.notification-copy p {
-  margin: 0 0 8px;
-  color: rgba(255, 255, 255, 0.88);
-  line-height: 1.45;
-}
-
-.notification-copy span {
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 13px;
-}
-
-.notification-read-button {
-  min-height: 44px;
-  border: none;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-  font-weight: 700;
-  cursor: pointer;
+.data-upload-copy {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.5;
 }
 
 .wide-button {
@@ -571,6 +522,47 @@
   line-height: 1.4;
 }
 
+.upload-format-note {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.upload-format-note strong,
+.upload-format-note p {
+  margin: 0;
+}
+
+.upload-preview-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.upload-preview-card p {
+  margin: 0;
+}
+
+.upload-preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.upload-preview-item {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.88);
+}
+
 .copy-button {
   min-height: 42px;
   padding: 0 14px;
@@ -746,4 +738,40 @@
 .form-field input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+.form-field input[type='file'] {
+  padding: 10px 12px;
+}
+
+.form-field input[type='file']::file-selector-button {
+  margin-right: 12px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(73, 209, 125, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #49d17d, #2f9e62);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.form-field input[type='file']::file-selector-button:hover {
+  filter: brightness(1.06);
+}
+
+.form-field input[type='file']::-webkit-file-upload-button {
+  margin-right: 12px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(73, 209, 125, 0.35);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #49d17d, #2f9e62);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
 }

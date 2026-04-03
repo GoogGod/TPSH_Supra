@@ -53,7 +53,9 @@ class MLRunner:
             if self.run.forecast_from:
                 kwargs["from_date"] = self.run.forecast_from.strftime("%Y-%m-%d")
             if self.run.forecast_to:
-                kwargs["to_date"] = self.run.forecast_to.strftime("%Y-%m-%d")
+                # DateField in ForecastRun is inclusive by calendar day.
+                # Pass end-of-day timestamp so ML range includes the whole last day.
+                kwargs["to_date"] = f"{self.run.forecast_to.strftime('%Y-%m-%d')} 23:59:59"
             if not self.run.forecast_from and not self.run.forecast_to:
                 kwargs["hours_ahead"] = self.run.hours_ahead
 

@@ -1,18 +1,62 @@
-Пояснения к структуре
-core/settings/
-Настройки разбиты на три файла. base.py содержит всё, что не зависит от окружения: INSTALLED_APPS, конфигурация DRF, JWT, CORS, Swagger, пути ML (ML_DATA_DIR, ML_DATA_RAW, ML_DATA_PREDICTED, ML_MODELS_DIR), глобальные правила планирования (SCHEDULE_RULES). dev.py — DEBUG=True, SQLite, CORS для localhost:5173. prod.py — PostgreSQL через DATABASE_URL, HTTPS, whitenoise. Выбор — по DJANGO_ENV.
+﻿ПОЯСНЕНИЕ К СТРУКТУРЕ (актуально)
 
-users/
-Модель User наследует AbstractUser. Добавлены поля: role (employee_noob, employee_pro, manager, admin), venue (FK на Venue), schedule_pattern (4/3, 4/2, 3/2, 2/2), shift_duration (8h, 14h, custom). Свойства work_days, off_days, cycle_length парсят паттерн для scheduler. is_employee возвращает True для обоих уровней сотрудников.
+1. backend/users
+- Регистрация, логин/логаут, профиль, список пользователей.
+- Роли:
+  - admin
+  - manager
+  - employee_pro
+  - employee_noob
+- Менеджеры/сотрудники видят пользователей своего venue + admin.
 
-shifts/
-Четыре модели. Venue — заведение (название, адрес, таймзона). MonthlySchedule — расписание на месяц (draft → published), хранит raw_csv. WaiterSlot — позиция «Официант N» в расписании (open → pending → confirmed). ScheduleEntry — один день одного слота (дата, тип смены, часы). csv_parser.py разбирает CSV от OR-Tools с нормализацией колонок и маппингом типов смен.
+2. backend/forecasting
+- Управляет ML-запусками и прогнозами.
+- Ключевые сущности:
+  - ForecastRun (история запусков + метрики)
+  - HourlyForecast (почасовые прогнозы)
+- Важные endpoint'ы:
+  - /forecast/upload-data/
+  - /forecast/run/
+  - /forecast/runs/
+  - /forecast/accuracy/
 
-forecasting/
-ForecastRun — запись о запуске ML-пайплайна (параметры, статус, метрики, ошибки). HourlyForecast — почасовой прогноз из forecast.csv. MLRunner — обёртка: переключает cwd и sys.path в ml_data/, вызывает main(), извлекает метрики из результата или .pkl. ForecastLoader — парсит forecast.csv и загружает в БД. ScheduleGenerator — вызывает scheduler.py, затем csv_parser для создания MonthlySchedule.
+3. backend/shifts
+- Управляет объектами (venues) и расписаниями.
+- Ключевые сущности:
+  - Venue
+  - MonthlySchedule
+  - WaiterSlot
+  - ScheduleEntry
+- Основная логика:
+  - статус расписания (есть/нет/опубликовано)
+  - генерация draft через ML pipeline
+  - редактирование draft
+  - публикация
+  - claim/assign/unassign слотов
 
-user_notifications/
-Модель Notification с 6 типами: schedule_published, slot_claimed, manual_assignment, assignment_accepted, assignment_rejected, schedule_reminder. Поддерживает подтверждение (requires_confirmation, confirmation_status). Сервисные функции создают уведомления массово (bulk_create).
+4. backend/user_notifications
+- Уведомления в системе:
+  - публикация расписания
+  - ручные назначения
+  - подтверждение/отклонение назначений
+- API для списка, счетчика непрочитанных, mark read, confirm/reject.
 
-ml_data/
-Изолированный ML-пакет. main.py — точка входа с аргументами process_data, train_model, make_forecast, evaluate, from_date, to_date, hours_ahead. Автоматически выбирает .xlsx или .csv из data/raw/. scheduler.py — OR-Tools оптимизация: читает forecast.csv, генерирует waiter_schedule.csv. Поддерживает вызов как main() из Django, так и standalone.
+5. ml_data
+- Отдельный ML-модуль, который backend вызывает как сервис.
+- main.py: процессинг, обучение, прогноз, (опционально) расписание.
+- scheduler.py: построение графика смен.
+- Папки данных:
+  - data/raw
+  - data/processed
+  - data/predicted/runs/venue_<id>/run_<id>
+
+6. front
+- SPA клиент на Vue.
+- Использует только backend API.
+- Корневые SPA-роуты обслуживаются fallback в backend core/urls.py.
+
+7. Почему так разделено
+- ML и API разделены, чтобы:
+  - легче сопровождать модель отдельно от REST,
+  - изолировать артефакты по venue/run,
+  - избежать конфликтов при параллельных генерациях.

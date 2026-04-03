@@ -5,18 +5,21 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema
 from django.conf import settings
-from django.db.models import Count, Q
+from django.db import transaction
+from django.db.models import Count, Q, Max
 from django.utils import timezone
 
-from .models import Venue, MonthlySchedule, WaiterSlot
+from .models import Venue, MonthlySchedule, WaiterSlot, ScheduleEntry
 from .serializers import (
     VenueSerializer,
+    VenueWriteSerializer,
+    ScheduleEntryPatchSerializer,
     MonthlyScheduleListSerializer,
     MonthlyScheduleDetailSerializer,
     WaiterSlotDetailSerializer,
 )
 from .services.csv_parser import parse_schedule_csv, CSVParseError
-from users.permissions import IsManager, IsEmployee
+from users.permissions import IsManager, IsAdmin
 from datetime import date
 import calendar
 import csv
@@ -39,6 +42,23 @@ class VenueListView(ListAPIView):
 
     def get_queryset(self):
         return Venue.objects.filter(is_active=True)
+
+
+class VenueCreateView(APIView):
+    """Создать новый объект (ресторан)."""
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    @extend_schema(
+        summary="Создать объект",
+        tags=["schedule"],
+        request=VenueWriteSerializer,
+        responses={201: VenueSerializer},
+    )
+    def post(self, request):
+        serializer = VenueWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        venue = serializer.save()
+        return Response(VenueSerializer(venue).data, status=status.HTTP_201_CREATED)
 
 
 # ═══════════ Загрузка CSV ═══════════
@@ -285,6 +305,157 @@ class DeleteScheduleView(APIView):
 
         schedule.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UpdateDraftScheduleEntriesView(APIView):
+    """
+    Массово обновить записи расписания в ЧЕРНОВИКЕ.
+    Полезно для ручной корректировки после генерации.
+    """
+    permission_classes = [IsAuthenticated, IsManager]
+
+    @extend_schema(
+        summary="Обновить записи черновика расписания",
+        tags=["schedule"],
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "updates": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "is_working": {"type": "boolean"},
+                                "shift_type": {
+                                    "type": "string",
+                                    "enum": ["off", "full", "morning", "evening"],
+                                },
+                                "waiters_needed": {"type": "integer"},
+                                "work_start": {"type": "string", "format": "time"},
+                                "work_end": {"type": "string", "format": "time"},
+                                "work_hours": {"type": "number"},
+                            },
+                            "required": ["id"],
+                        },
+                    }
+                },
+                "required": ["updates"],
+            }
+        },
+    )
+    def patch(self, request, pk):
+        try:
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
+        except MonthlySchedule.DoesNotExist:
+            return Response({"detail": "Не найдено."}, status=404)
+
+        user = request.user
+        if user.is_manager and not user.is_admin_role:
+            if not user.venue_id or user.venue_id != schedule.venue_id:
+                return Response(
+                    {"detail": "Доступ к этому расписанию запрещен."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if schedule.status != MonthlySchedule.Status.DRAFT:
+            return Response(
+                {"detail": "Редактировать можно только черновик."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        updates = request.data.get("updates")
+        if not isinstance(updates, list) or not updates:
+            return Response(
+                {"detail": "Передайте непустой массив updates."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        entry_ids = []
+        for item in updates:
+            if not isinstance(item, dict):
+                return Response(
+                    {"detail": "Каждый элемент updates должен быть объектом."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if "id" not in item:
+                return Response(
+                    {"detail": "У каждой записи updates должен быть id."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                entry_ids.append(int(item["id"]))
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "id в updates должен быть числом."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        entries = {
+            entry.id: entry
+            for entry in ScheduleEntry.objects.filter(
+                slot__schedule=schedule,
+                id__in=set(entry_ids),
+            )
+        }
+        missing = sorted(set(entry_ids) - set(entries.keys()))
+        if missing:
+            return Response(
+                {
+                    "detail": "Часть записей не найдена в этом расписании.",
+                    "missing_entry_ids": missing,
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        editable_fields = {
+            "is_working",
+            "shift_type",
+            "waiters_needed",
+            "work_start",
+            "work_end",
+            "work_hours",
+        }
+        prepared = []
+        errors = {}
+
+        for idx, item in enumerate(updates):
+            if not any(field in item for field in editable_fields):
+                errors[str(idx)] = {"detail": "Нет полей для изменения."}
+                continue
+
+            entry = entries[int(item["id"])]
+            serializer = ScheduleEntryPatchSerializer(entry, data=item, partial=True)
+            if serializer.is_valid():
+                prepared.append(serializer)
+            else:
+                errors[str(idx)] = serializer.errors
+
+        if errors:
+            return Response(
+                {
+                    "detail": "Есть ошибки в updates.",
+                    "errors": errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            for serializer in prepared:
+                serializer.save()
+            MonthlySchedule.objects.filter(pk=schedule.pk).update(updated_at=timezone.now())
+
+        schedule.refresh_from_db(fields=["updated_at"])
+        return Response(
+            {
+                "detail": "Черновик расписания обновлен.",
+                "schedule_id": schedule.id,
+                "updated_entries_count": len(prepared),
+                "updated_at": schedule.updated_at,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 # ═══════════ Claim (сотрудник сам занимает) ═══════════
@@ -592,65 +763,28 @@ class GenerateMonthlyScheduleView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
 
     @staticmethod
-    def _build_waiter_config(venue):
+    def _build_scheduler_profile(venue):
         """
-        Собрать waiter_config под scheduler из активных сотрудников venue.
-        employee_pro -> pro, employee_noob -> noob.
+        Подготовить профиль для scheduler из фактического состава venue.
+        Новый scheduler использует долю noob, а не waiter_config по каждому номеру.
         """
         from users.models import User
 
-        staff = list(
-            User.objects.filter(
-                venue=venue,
-                is_active=True,
-                role__in=[User.Role.EMPLOYEE_PRO, User.Role.EMPLOYEE_NOOB],
-            ).order_by("id")
+        staff_qs = User.objects.filter(
+            venue=venue,
+            is_active=True,
+            role__in=[User.Role.EMPLOYEE_PRO, User.Role.EMPLOYEE_NOOB],
         )
 
-        waiter_config = {}
-        idx = 1
-        for employee in staff:
-            waiter_config[idx] = (
-                "pro"
-                if employee.role == User.Role.EMPLOYEE_PRO
-                else "noob"
-            )
-            idx += 1
+        total_staff = staff_qs.count()
+        noob_count = staff_qs.filter(role=User.Role.EMPLOYEE_NOOB).count()
+        noob_ratio = (noob_count / total_staff) if total_staff else 0.5
+        noob_ratio = max(0.0, min(1.0, noob_ratio))
 
-        # Минимальная базовая ёмкость для ограничений scheduler: >= 10 условных единиц.
-        # pro = 2, noob = 1.
-        capacity_units = sum(2 if t == "pro" else 1 for t in waiter_config.values())
-        while capacity_units < 10:
-            waiter_config[idx] = "pro"
-            idx += 1
-            capacity_units += 2
-
-        # Если сотрудников вообще нет, отдаём рабочий базовый конфиг.
-        if not waiter_config:
-            waiter_config = {
-                1: "pro",
-                2: "pro",
-                3: "pro",
-                4: "pro",
-                5: "pro",
-            }
-
-        return waiter_config
-
-    @staticmethod
-    def _extend_waiter_config(waiter_config: dict, target_total: int) -> dict:
-        """Расширить waiter_config до target_total, добавляя pro."""
-        normalized = {}
-        idx = 1
-        for _, waiter_type in sorted(waiter_config.items(), key=lambda kv: int(kv[0])):
-            normalized[idx] = waiter_type
-            idx += 1
-
-        while len(normalized) < target_total:
-            normalized[idx] = "pro"
-            idx += 1
-
-        return normalized
+        return {
+            "total_staff": total_staff,
+            "noob_ratio": noob_ratio,
+        }
 
     @staticmethod
     def _has_working_shifts(schedule_df) -> bool:
@@ -698,10 +832,16 @@ class GenerateMonthlyScheduleView(APIView):
         return False
 
     @staticmethod
-    def _generate_schedule_fallback(*, forecast_csv_path: Path, schedule_csv_path: Path, waiter_config: dict):
+    def _generate_schedule_fallback(
+        *,
+        forecast_csv_path: Path,
+        schedule_csv_path: Path,
+        noob_ratio: float,
+    ):
         """
         Если main.py не создал waiter_schedule.csv, пробуем построить напрямую через scheduler.
-        При пустом результате автоматически увеличиваем число виртуальных pro.
+        Новый scheduler не принимает waiter_config, поэтому повторяем генерацию
+        с более мягкими параметрами min_hours_per_waiter.
         """
         if GenerateMonthlyScheduleView._csv_has_working_shifts(schedule_csv_path):
             return
@@ -718,30 +858,93 @@ class GenerateMonthlyScheduleView(APIView):
         from ml_data.scheduler import create_waiter_schedule
 
         schedule_csv_path.parent.mkdir(parents=True, exist_ok=True)
-        base_waiters = max(len(waiter_config), 1)
-        max_waiters = max(base_waiters, 24)
-        last_attempt = base_waiters
 
-        for total_waiters in range(base_waiters, max_waiters + 1):
-            current_config = GenerateMonthlyScheduleView._extend_waiter_config(
-                waiter_config, total_waiters
-            )
+        attempts = [
+            (noob_ratio, 200),
+            (noob_ratio, 160),
+            (noob_ratio, 120),
+            (0.5, 120),
+            (0.5, 80),
+            (0.5, 40),
+            (0.5, 0),
+        ]
+
+        for ratio, min_hours in attempts:
             schedule_df, _ = create_waiter_schedule(
                 forecast_path=str(forecast_csv_path),
-                waiter_config=current_config,
                 output_path=str(schedule_csv_path),
+                min_hours_per_waiter=int(min_hours),
+                best_effort=True,
+                noob_ratio=float(ratio),
                 verbose=False,
             )
-            last_attempt = total_waiters
-
             if GenerateMonthlyScheduleView._has_working_shifts(schedule_df):
                 if not schedule_csv_path.exists() or schedule_csv_path.stat().st_size == 0:
                     raise FileNotFoundError(f"Файл расписания не создан: {schedule_csv_path}")
                 return
 
         raise CSVParseError(
-            f"planner вернул пустое расписание (даже при {last_attempt} официантах)"
+            "planner вернул пустое расписание (fallback исчерпан)"
         )
+
+    @staticmethod
+    def _calculate_staff_shortage(schedule: MonthlySchedule) -> dict:
+        """
+        Оценить нехватку сотрудников по сгенерированному расписанию.
+
+        required_waiters_per_day: max(waiters_needed) за день.
+        scheduled_slots_per_day: число рабочих слотов (is_working=True) за день.
+        """
+        from users.models import User
+
+        available_staff = User.objects.filter(
+            venue=schedule.venue,
+            is_active=True,
+            role__in=[User.Role.EMPLOYEE_PRO, User.Role.EMPLOYEE_NOOB],
+        ).count()
+
+        daily_rows = list(
+            ScheduleEntry.objects.filter(slot__schedule=schedule)
+            .values("date")
+            .annotate(
+                required_waiters=Max("waiters_needed"),
+                scheduled_slots=Count("id", filter=Q(is_working=True)),
+            )
+            .order_by("date")
+        )
+
+        if not daily_rows:
+            return {
+                "available_staff": available_staff,
+                "required_waiters_peak": 0,
+                "lack_staff_peak": 0,
+                "days_with_shortage": 0,
+                "shortage_person_days": 0,
+            }
+
+        required_waiters_peak = 0
+        days_with_shortage = 0
+        shortage_person_days = 0
+
+        for row in daily_rows:
+            required = int(row.get("required_waiters") or 0)
+            scheduled = int(row.get("scheduled_slots") or 0)
+            shortage = max(0, required - scheduled)
+
+            required_waiters_peak = max(required_waiters_peak, required)
+            if shortage > 0:
+                days_with_shortage += 1
+                shortage_person_days += shortage
+
+        lack_staff_peak = max(0, required_waiters_peak - available_staff)
+
+        return {
+            "available_staff": available_staff,
+            "required_waiters_peak": required_waiters_peak,
+            "lack_staff_peak": lack_staff_peak,
+            "days_with_shortage": days_with_shortage,
+            "shortage_person_days": shortage_person_days,
+        }
 
     def post(self, request):
         venue_id = request.data.get("venue")
@@ -825,7 +1028,8 @@ class GenerateMonthlyScheduleView(APIView):
         _, last_day = calendar.monthrange(year, month)
         forecast_from = date(year, month, 1)
         forecast_to = date(year, month, last_day)
-        waiter_config = self._build_waiter_config(venue)
+        scheduler_profile = self._build_scheduler_profile(venue)
+        noob_ratio = scheduler_profile["noob_ratio"]
 
         forecast_run = ForecastRun.objects.create(
             venue=venue,
@@ -853,8 +1057,7 @@ class GenerateMonthlyScheduleView(APIView):
                 predicted_dir=run_outputs_dir,
                 make_schedule=True,
                 pipeline_kwargs={
-                    "num_waiters": len(waiter_config),
-                    "waiter_config": waiter_config,
+                    "noob_ratio": noob_ratio,
                 },
             )
         except Exception:
@@ -875,7 +1078,7 @@ class GenerateMonthlyScheduleView(APIView):
             self._generate_schedule_fallback(
                 forecast_csv_path=forecast_csv_path,
                 schedule_csv_path=schedule_csv_path,
-                waiter_config=waiter_config,
+                noob_ratio=noob_ratio,
             )
             with open(schedule_csv_path, "r", encoding="utf-8-sig") as f:
                 csv_content = f.read()
@@ -900,6 +1103,7 @@ class GenerateMonthlyScheduleView(APIView):
 
         slots_count = schedule.slots.count()
         entries_count = schedule.slots.aggregate(total_entries=Count("entries"))["total_entries"] or 0
+        shortage = self._calculate_staff_shortage(schedule)
 
         return Response(
             {
@@ -911,6 +1115,11 @@ class GenerateMonthlyScheduleView(APIView):
                 "entries_count": entries_count,
                 "forecast_run_id": forecast_run.id,
                 "artifacts_dir": str(run_outputs_dir),
+                "available_staff": shortage["available_staff"],
+                "required_waiters_peak": shortage["required_waiters_peak"],
+                "lack_staff_peak": shortage["lack_staff_peak"],
+                "days_with_shortage": shortage["days_with_shortage"],
+                "shortage_person_days": shortage["shortage_person_days"],
             },
             status=status.HTTP_201_CREATED,
         )

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -10,6 +10,7 @@ from rest_framework_simplejwt.views import (
 )
 from users.views import MeView
 from users.urls import user_urlpatterns
+from .views import FrontendAppView
 
 urlpatterns = [
     # Django Admin
@@ -36,4 +37,7 @@ urlpatterns = [
     # Docs
     path("api/v1/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/v1/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
+
+    # Frontend SPA (must be last)
+    re_path(r"^(?!api/|admin/|static/).*$", FrontendAppView.as_view(), name="frontend-app"),
 ]

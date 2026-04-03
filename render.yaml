@@ -5,6 +5,7 @@ services:
     dockerfilePath: ./Dockerfile
     autoDeploy: true
     plan: free
+    healthCheckPath: /api/v1/docs/
     disk:
       name: supra-ml-data
       mountPath: /var/data
@@ -15,9 +16,9 @@ services:
       - key: ML_DATA_DIR
         value: /var/data/ml_data
       - key: ALLOWED_HOSTS
-        value: your-service-name.onrender.com
+        value: tpsh-supra-k1v6.onrender.com,tpsh-supra.onrender.com
       - key: CORS_ORIGINS
-        value: https://your-frontend.onrender.com
+        value: https://tpsh-supra-k1v6.onrender.com,https://tpsh-supra.onrender.com
       - key: JWT_ACCESS_TOKEN_MINUTES
         value: 480
       - key: JWT_REFRESH_TOKEN_DAYS
