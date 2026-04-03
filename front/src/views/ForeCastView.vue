@@ -53,6 +53,24 @@
           <div v-else class="schedule-status-card is-soft">{{ roleHint }}</div>
         </div>
 
+        <article v-if="staffShortageSummary" class="schedule-shortage-card">
+          <div class="schedule-shortage-head">
+            <span class="schedule-shortage-badge">Нехватка персонала</span>
+            <strong class="schedule-shortage-value">
+              {{ staffShortageSummary.shortage }}
+            </strong>
+          </div>
+          <p class="schedule-shortage-copy">
+            Сейчас в заведении доступно {{ staffShortageSummary.available }} сотрудников, а в пиковый момент нужно {{ staffShortageSummary.required }}.
+            <span v-if="staffShortageSummary.shortage > 0">
+              Не хватает {{ staffShortageSummary.shortage }} {{ getShortageUnitLabel(staffShortageSummary.shortage) }}.
+            </span>
+            <span v-else>
+              Нехватки персонала нет.
+            </span>
+          </p>
+        </article>
+
         <div v-if="scheduleMetrics.length" class="schedule-metrics-grid">
           <article v-for="metric in scheduleMetrics" :key="metric.key" class="schedule-metric-card">
             <span class="schedule-metric-label">{{ metric.label }}</span>
@@ -187,8 +205,14 @@
             >
               <div class="day-number">{{ day.date.getDate() }}</div>
               <div v-if="day.shift" class="day-shift-mark">
-                <span class="shift-chip">{{ getShiftLabel(day.shift.shift_type) }}</span>
-                <span v-if="day.shift.work_start && day.shift.work_end" class="shift-caption">{{ day.shift.work_start }}-{{ day.shift.work_end }}</span>
+                <span class="shift-chip">
+                  <span class="shift-chip-full">{{ getShiftLabel(day.shift.shift_type) }}</span>
+                  <span class="shift-chip-short">{{ getShiftShortLabel(day.shift.shift_type) }}</span>
+                </span>
+                <span v-if="day.shift.work_start && day.shift.work_end" class="shift-caption">
+                  <span>{{ day.shift.work_start }}</span>
+                  <span>{{ day.shift.work_end }}</span>
+                </span>
               </div>
               <div v-else-if="day.hasOpenSlots" class="day-open-mark"><span class="shift-chip open-slot-chip">Есть смены</span></div>
             </div>
@@ -366,6 +390,28 @@ export default {
     hasPendingScheduleEdits() {
       if (this.editableEntries.length !== this.selectedWaiterEntries.length) return this.editableEntries.length > 0
       return this.editableEntries.some((entry, index) => JSON.stringify(buildComparableEntryState(entry)) !== JSON.stringify(buildComparableEntryState(this.selectedWaiterEntries[index])))
+    },
+    staffShortageSummary() {
+      const summary = this.latestGenerationSummary
+      if (!summary) return null
+
+      const available = Number(summary.available_staff)
+      const required = Number(summary.required_waiters_peak)
+      const explicitShortage = Number(summary.lack_staff_peak)
+
+      if (!Number.isFinite(available) || !Number.isFinite(required)) {
+        return null
+      }
+
+      const shortage = Number.isFinite(explicitShortage)
+        ? explicitShortage
+        : Math.max(required - available, 0)
+
+      return {
+        available,
+        required,
+        shortage: Math.max(shortage, 0)
+      }
     },
     scheduleMetrics() {
       const summary = this.latestGenerationSummary
@@ -612,6 +658,14 @@ export default {
       return `${role} · свободно`
     },
     getGradeLabel(grade) { const normalized = String(grade || '').toLowerCase(); if (normalized === 'employee_noob') return 'Стажер'; if (normalized === 'employee_pro') return 'Опытный'; return '' },
+    getShortageUnitLabel(value) {
+      const count = Math.abs(Number(value)) % 100
+      const last = count % 10
+      if (count > 10 && count < 20) return 'сотрудников'
+      if (last === 1) return 'сотрудника'
+      if (last >= 2 && last <= 4) return 'сотрудников'
+      return 'сотрудников'
+    },
     canSelectWaiter(waiter) {
       if (!waiter) return false
       if (!this.isWaiterView) return true
@@ -623,6 +677,13 @@ export default {
     },
     getWaiterColor(key) { const hash = String(key || '').split('').reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0); return WAITER_COLORS[hash % WAITER_COLORS.length] },
     getShiftLabel(shiftType) { return SHIFT_LABELS[shiftType] || shiftType || '' },
+    getShiftShortLabel(shiftType) {
+      const normalized = String(shiftType || '').toLowerCase()
+      if (normalized === 'full') return 'П'
+      if (normalized === 'morning') return 'У'
+      if (normalized === 'evening') return 'В'
+      return this.getShiftLabel(shiftType)
+    },
     getWaiterButtonStyle(waiter) { return waiter.slot_position_key !== this.selectedWaiter ? {} : { borderColor: waiter.color, boxShadow: `0 0 0 1px ${waiter.color} inset` } },
     getDayStyle(day) {
       if (day.shift) return { backgroundColor: this.selectedWaiterInfo?.color || this.getWaiterColor(this.selectedWaiter), color: '#ffffff' }

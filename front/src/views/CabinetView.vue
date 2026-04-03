@@ -87,7 +87,7 @@
 
     <transition name="modal-fade">
       <div v-if="showEmployeesModal" class="modal-overlay" @click.self="closeEmployeesModal">
-        <div class="modal-card">
+        <div class="modal-card employees-modal-card">
           <div class="modal-header">
             <div>
               <p class="modal-subtitle">Команда</p>

@@ -453,6 +453,7 @@ const normalizeScheduleEntry = (item) => {
     waiters_needed: firstDefined(item.waiters_needed, item.required_waiters, shift.waiters_needed, null),
     is_working: isWorking,
     assignment_status: status || null,
+    employee_role: firstDefined(item.employee_role, employee.role, null),
     employee_role_display: firstDefined(item.employee_role_display, employee.role_display, null),
     employee_pro: item.employee_pro === true,
     employee_noob: item.employee_noob === true
