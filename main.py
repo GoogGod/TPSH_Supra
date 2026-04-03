@@ -7,7 +7,7 @@ from src.models.evaluate import evaluate_model
 from src.export import save_forecast_to_csv
 from src.config import (
     RAW_EXCEL_FILE, RAW_DATA_FILE,
-    MODEL_FILE, DATA_PRED_DIR, FEATURE_COLS, DATA_RAW_NEW_DIR
+    MODEL_FILE, DATA_PRED_DIR, MIN_WAITERS_ABSOLUTE, DATA_RAW_NEW_DIR
 )
 from pathlib import Path
 from typing import Optional, Union
@@ -23,8 +23,8 @@ def main(
     make_schedule: bool = True,
     incremental_training: bool = False,
     model_type: str = 'xgboost',
-    num_waiters: int = 6,
-    waiter_config: dict = None,
+    min_hours_per_waiter: int = 200,
+    novice_ratio: float = 0.5,
     from_date: Optional[Union[str, datetime]] = None,
     to_date: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
@@ -33,7 +33,7 @@ def main(
 ):
     print("СИСТЕМА ПРОГНОЗИРОВАНИЯ ЗАКАЗОВ И ГОСТЕЙ")
     
-    # Обработка сырых данных
+    # 1. ОБРАБОТКА СЫРЫХ ДАННЫХ
     if process_data:        
         output_path, stats = process_raw_data(
             input_file=RAW_EXCEL_FILE,
@@ -42,7 +42,7 @@ def main(
             force_reprocess=True
         )
 
-    # Загрузка и подготовка данных
+    # 2. ЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ
     print("\nЗАГРУЗКА И ПОДГОТОВКА ДАННЫХ")
     
     # Проверка новых данных
@@ -75,7 +75,7 @@ def main(
     print("\nПодготовка признаков...")
     df_agg, feature_cols = prepare_features(data, verbose=verbose)
     
-    # Обучение модели
+    # 3. ОБУЧЕНИЕ МОДЕЛИ
     if train_model:
         print("\nОБУЧЕНИЕ МОДЕЛИ")
         
@@ -103,7 +103,7 @@ def main(
         print("\nПропускаем обучение модели")
         metrics = {}
     
-    # Оценка модели
+    # 4. ОЦЕНКА МОДЕЛИ
     if evaluate and train_model:        
         eval_metrics = evaluate_model(
             model_path=str(MODEL_FILE),
@@ -119,7 +119,7 @@ def main(
     else:
         eval_metrics = {}
     
-    # Прогноз
+    # 5. ПРОГНОЗ
     forecast = None
     csv_path = None
     
@@ -154,30 +154,33 @@ def main(
     else:
         print("\nПропускаем прогноз")
     
-    # Планирование смен
+
+    # 6. ПЛАНИРОВАНИЕ СМЕН
+
     if make_schedule and forecast is not None:
         print("\nПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
         
         from scheduler import create_waiter_schedule
         
-        if waiter_config is None:
-            waiter_config = {
-                1: 'specialist', 2: 'specialist', 3: 'specialist',
-                4: 'novice', 5: 'novice', 6: 'novice'
-            }
-        
         schedule_df, schedule_stats = create_waiter_schedule(
             forecast_path=f'{DATA_PRED_DIR}/forecast.csv',
-            waiter_config=waiter_config,
             output_path=f'{DATA_PRED_DIR}/waiter_schedule.csv',
+            min_hours_per_waiter=min_hours_per_waiter,
+            best_effort=True,
+            novice_ratio=novice_ratio,
             verbose=verbose
         )
+        
+        # Обновляем итоговую статистику для вывода
+        if schedule_stats and 'num_waiters' in schedule_stats:
+            # Сохраняем в stats для итогового отчёта
+            schedule_stats['num_waiters_reported'] = schedule_stats['num_waiters']
     else:
         print("\nПропускаем планирование смен")
         schedule_df = None
         schedule_stats = {}
     
-    # ИТОГИ
+    # 7. ИТОГИ
     print("ПАЙПЛАЙН ЗАВЕРШЁН")
     
     if csv_path:
@@ -188,16 +191,47 @@ def main(
         print(f"   С: {forecast['datetime'].min()}")
         print(f"   По: {forecast['datetime'].max()}")
         print(f"   Всего часов: {len(forecast)}")
-        print(f"   Всего заказов: {forecast['orders_with_buffer'].sum()} (с буфером +25%)")
-        print(f"   Всего гостей: {forecast['guests_with_buffer'].sum()} (с буфером +25%)")
-        print(f"   Среднее в час: {forecast['orders_with_buffer'].mean():.2f} заказов, {forecast['guests_with_buffer'].mean():.2f} гостей")
+        print(f"   Всего заказов: {forecast['orders_with_buffer'].sum():,} (с буфером +25%)")
+        print(f"   Всего гостей: {forecast['guests_with_buffer'].sum():,} (с буфером +25%)")
+        print(f"   Среднее в час: {forecast['orders_with_buffer'].mean():.2f} заказов, "
+              f"{forecast['guests_with_buffer'].mean():.2f} гостей")
     
-    if schedule_df is not None:
+    if schedule_df is not None and not schedule_df.empty:
         print(f"\nРасписание официантов:")
         print(f"   Файл: {DATA_PRED_DIR}/waiter_schedule.csv")
-        print(f"   Количество официантов: {num_waiters}")
+
+        num_waiters = schedule_stats.get('num_waiters', 'N/A')
+        num_specialists = schedule_stats.get('num_specialists', 'N/A')
+        num_novices = schedule_stats.get('num_novices', 'N/A')
+
+        print(f"   Официантов: {num_waiters} (минимум {MIN_WAITERS_ABSOLUTE})")
+        print(f"   Специалистов: {num_specialists}")
+        print(f"   Новичков: {num_novices}")
         print(f"   Всего смен: {schedule_stats.get('total_shifts', 0)}")
-    
+        print(f"   Всего часов: {schedule_stats.get('total_hours', 0)}")
+        print(f"   Часов/официант: {schedule_stats.get('avg_hours_per_waiter', 0):.1f}")
+
+        # Отображение нормы с учётом месяцев
+        if schedule_stats.get('best_effort'):
+            num_months = schedule_stats.get('num_months', 1)
+            min_per_month = schedule_stats.get('min_hours_per_month', 200)
+            total_target = schedule_stats.get('total_min_hours', min_per_month)
+            actual = schedule_stats.get('avg_hours_per_waiter', 0)
+
+            print(f"\n   Период: {num_months:.1f} месяцев")
+            print(f"   Норма: {min_per_month}ч/мес × {num_months:.1f}мес = {total_target}ч")
+            print(f"   Фактически: {actual:.1f}ч ({actual/total_target*100 if total_target > 0 else 0:.0f}%)")
+        else:
+            print(f"   Норма: {min_hours_per_waiter}ч выполнена всеми")
+            
+    if schedule_stats.get('best_effort'):
+        target = schedule_stats.get('target_hours', min_hours_per_waiter)
+        actual = schedule_stats.get('avg_hours_per_waiter', 0)
+        pct = actual / target * 100 if target > 0 else 0
+        print(f"Цель: {target}ч, Фактически: {actual:.1f}ч ({pct:.0f}%)")
+    else:
+        print(f"Норма: {min_hours_per_waiter}ч выполнена всеми")
+        
     if metrics:
         print(f"\nМетрики модели:")
         print(f"   Тип: {metrics.get('model_type', 'N/A')}")
@@ -205,14 +239,9 @@ def main(
         print(f"   MAE (Test): {metrics.get('test_mae', 0):.2f}")
         if 'training_date' in metrics:
             print(f"   Дата обучения: {metrics['training_date']}")
-
+    
 
 if __name__ == '__main__':
-    waiter_config = {
-        1: 'specialist', 2: 'specialist', 3: 'specialist', 4: 'specialist', 5: 'specialist', 6: 'specialist', 7: 'specialist',
-        8: 'novice', 9: 'novice'
-    }
-    
     main(
         process_data=True,
         train_model=True,
@@ -221,10 +250,10 @@ if __name__ == '__main__':
         make_schedule=True,
         incremental_training=False,
         model_type='xgboost',
-        num_waiters=9,
-        waiter_config=waiter_config,
+        min_hours_per_waiter=180,
+        novice_ratio=0.3,
         verbose=True,
         force_fresh_weather=True,
-        from_date='2026-03-01',
-        to_date='2026-05-01'
+        from_date='2026-05-01',
+        to_date='2026-07-01'
     )

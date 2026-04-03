@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 from ortools.sat.python import cp_model
 from pathlib import Path
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict, List, Optional
+from src.config import MIN_WAITERS_ABSOLUTE
 
 
 # КОНФИГУРАЦИЯ
@@ -23,390 +24,337 @@ WAITER_TYPES = {
 SHIFT_TYPES = {
     'full': {
         'name': 'Полная',
-        'start': 9,
+        'start': 10,
         'end': 22,    
         'hours': 12,
-        'code': 1
+        'code': 1,
+        'covers_hours': list(range(10, 22))
     },
     'morning': {
         'name': 'Утренняя',
-        'start': 9,
+        'start': 10,
         'end': 16,
         'hours': 6,      
-        'code': 2
+        'code': 2,
+        'covers_hours': list(range(10, 16))
     },
     'evening': {
         'name': 'Вечерняя',
         'start': 16,
         'end': 25,      
         'hours': 9,
-        'code': 3
+        'code': 3,
+        'covers_hours': list(range(16, 23))
     },
     'off': {
         'name': 'Выходной',
         'start': None,
         'end': None,
         'hours': 0,
-        'code': 0
+        'code': 0,
+        'covers_hours': []
     }
 }
 
-# Минимальная выработка в месяц (часов)
 MIN_HOURS_PER_MONTH = 200
+AVG_CAPACITY = 7.5 
 
 
-class WaiterScheduler:
+def estimate_max_waiters(forecast_df: pd.DataFrame, min_hours: int = 200) -> Tuple[int, int, bool]:
+    # Пиковая потребность
+    peak_guests = forecast_df['guests_with_buffer'].max()
+    min_by_peak = max(MIN_WAITERS_ABSOLUTE, int(np.ceil(peak_guests / 10)))
+    
+    # Общая потребность в часах
+    total_guests = forecast_df['guests_with_buffer'].sum()
+    total_waiter_hours = int(np.ceil(total_guests / AVG_CAPACITY))
+    
+    # Минимум 5 официантов всегда
+    min_waiters = MIN_WAITERS_ABSOLUTE
+    
+    # Максимум официантов по норме часов
+    max_by_hours = int(np.floor(total_waiter_hours / min_hours)) if min_hours > 0 else 10
+    max_by_hours = max(max_by_hours, min_waiters)
+    
+    # Проверка реализуемости
+    is_feasible = min_by_peak <= max_by_hours
+    
+    # Рекомендуемая норма часов для минимума официантов
+    suggested_min_hours = max(10, int(total_waiter_hours / min_waiters * 0.95))
+    
+    if not is_feasible or min_hours > suggested_min_hours:
+        print(f"Внимание: при {min_waiters} официантах и такой нагрузке:")
+        print(f"   Доступно часов работы: {total_waiter_hours}")
+        print(f"   Макс. норма на официанта: {suggested_min_hours}ч (вместо {min_hours}ч)")
+    
+    # Возвращаем с запасом
+    max_waiters = max(min_by_peak, max_by_hours) + 2
+    return max_waiters, suggested_min_hours, is_feasible
+
+
+def get_shift_for_hour(shift_code: int, hour: int) -> bool:
+    """Проверяет, покрывает ли смена данный час."""
+    if shift_code == 1:  # Полная: 10-22
+        return 10 <= hour < 22
+    elif shift_code == 2:  # Утренняя: 10-16
+        return 10 <= hour < 16
+    elif shift_code == 3:  # Вечерняя: 16-23
+        return 16 <= hour < 23
+    return False
+
+
+# ОСНОВНОЙ КЛАСС
+
+class WaiterScheduler:  
     def __init__(
         self,
-        min_waiters_per_shift: int = 5,
-        max_work_hours_per_week: int = 48,
-        min_days_off_per_week: int = 1
+        min_hours_per_waiter: int = MIN_HOURS_PER_MONTH,
+        max_hours_per_week: int = 48,
+        verbose: bool = True,
+        best_effort: bool = True,
+        novice_ratio: float = 0.5
     ):
-        self.min_waiters_per_shift = min_waiters_per_shift
-        self.max_work_hours_per_week = max_work_hours_per_week
+        self.min_hours = min_hours_per_waiter
+        self.max_weekly_hours = max_hours_per_week
+        self.verbose = verbose
+        self.best_effort = best_effort
+        self.novice_ratio = novice_ratio
         
-        self.working_hour_start = 10
-        self.working_hour_end = 23
+        # Рабочие часы ресторана
+        self.work_start = 10
+        self.work_end = 23
     
-    def calculate_waiters_needed(
-        self, 
-        forecast_df: pd.DataFrame,
-        waiter_config: Dict[int, str]
-    ) -> pd.DataFrame:
+    def _prepare_data(self, forecast_df: pd.DataFrame) -> pd.DataFrame:
         df = forecast_df.copy()
-
-        # Вместимость по типам официантов
-        capacities = {
-            'specialist': 10,
-            'novice': 5
-        }
-
-        # Средняя вместимость одного официанта в бригаде
-        avg_capacity = np.mean([capacities[t] for t in waiter_config.values()])
-
-        # Используем гостей с буфером
-        if 'guests_with_buffer' in df.columns:
-            guests_column = 'guests_with_buffer'
-        else:
-            guests_column = 'guests_predicted'
-
-        # Количество официантов = гости / средняя вместимость
-        df['waiters_needed'] = np.ceil(
-            df[guests_column] / avg_capacity
-        ).astype(int)
-
-        # МИНИМУМ 5 ОФИЦИАНТОВ В РАБОЧИЕ ЧАСЫ
-        working_mask = (df['hour'] >= self.working_hour_start) & \
-                       (df['hour'] < self.working_hour_end)
-
-        # Устанавливаем минимум 5 официантов
-        df.loc[working_mask, 'waiters_needed'] = df.loc[
-            working_mask, 'waiters_needed'
-        ].clip(lower=self.min_waiters_per_shift) 
-
-        # Вне рабочих часов — 0 официантов
-        df.loc[~working_mask, 'waiters_needed'] = 0
-
-        return df
-    
-    def calculate_daily_shift_requirements(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-
-        # Извлекаем дату из datetime
-        df['date'] = pd.to_datetime(df['datetime']).dt.date
-
-        # Группируем по дате и часу, берём максимум waiters_needed
-        daily_hourly = df.groupby(['date', 'hour'])['waiters_needed'].max().reset_index()
-
-        # Используем только существующие колонки
-        agg_dict = {
-            'waiters_max': ('waiters_needed', 'max'),
-            'waiters_mean': ('waiters_needed', 'mean'),
-        }
-
-        # Добавляем guests_with_buffer только если колонка существует
-        if 'guests_with_buffer' in daily_hourly.columns:
-            agg_dict['total_guests'] = ('guests_with_buffer', 'sum')
-        elif 'guests_predicted' in df.columns:
-            # Берём из исходного df, сгруппированного по дате
-            daily_guests = df.groupby('date')['guests_predicted'].sum().reset_index()
-            daily_guests.columns = ['date', 'total_guests']
-            agg_dict['total_guests'] = ('waiters_needed', 'count')  # заглушка
-
-        daily_req = daily_hourly.groupby('date').agg(**agg_dict).reset_index()
-
-        # Добавляем потребность по сменам
-        daily_req['morning_need'] = daily_req['waiters_max']
-        daily_req['evening_need'] = daily_req['waiters_max']
-        daily_req['total_waiters_needed'] = daily_req['waiters_max']
-
-        return daily_req
-    
-    def create_schedule(
-        self,
-        forecast_df: pd.DataFrame,
-        waiter_config: Dict[int, str],
-        verbose: bool = True
-    ) -> Tuple[pd.DataFrame, Dict]:
-        if verbose:
-            print("ПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
-        
-        # Копируем forecast_df, а не df
-        df = forecast_df.copy()
-        
-        # Извлекаем дату и час
-        df['date'] = pd.to_datetime(df['datetime']).dt.date
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df['date'] = df['datetime'].dt.date
         df['hour'] = df['datetime'].dt.hour
         
-        # Рассчитываем потребность в официантах
-        df = self.calculate_waiters_needed(df, waiter_config)
-        daily_req = self.calculate_daily_shift_requirements(df)
+        # Используем гостей с буфером
+        guest_col = 'guests_with_buffer' if 'guests_with_buffer' in df.columns else 'guests_predicted'
+        df['guests'] = df[guest_col].fillna(0).astype(int)
         
-        num_days = len(daily_req)
-        date_list = daily_req['date'].tolist()
-        num_waiters = len(waiter_config)
+        return df
+    
+    def _create_model(
+        self,
+        df: pd.DataFrame,
+        max_waiters: int,
+        min_hours: int,
+        best_effort: bool = None
+    ) -> Tuple[cp_model.CpModel, cp_model.CpSolver, Dict]:
         
-        if verbose:
-            print(f"\nПериод планирования: {num_days} дней (~{num_days/30*100:.0f}% месяца)")
-            print(f"Количество официантов: {num_waiters}")
-            print(f"Типы официантов:")
-            for w, t in waiter_config.items():
-                cap = WAITER_TYPES[t]['capacity']
-                print(f"   Официант {w}: {WAITER_TYPES[t]['name']} ({cap} гостей/час)")
-            print(f"Типы смен: Полная (10-23), Утренняя (10-16), Вечерняя (16-23)")
-            print(f"Минимальная выработка: {MIN_HOURS_PER_MONTH} часов/месяц")
+        if best_effort is None:
+            best_effort = self.best_effort
         
-        # Рассчитываем реальную потребность в часах
-        total_guest_hours = df[df['guests_with_buffer'] > 0]['guests_with_buffer'].sum()
-        avg_capacity = np.mean([WAITER_TYPES[t]['capacity'] for t in waiter_config.values()])
-        estimated_total_hours = int(np.ceil(total_guest_hours / avg_capacity))
+        num_days = df['date'].nunique()
+        date_list = sorted(df['date'].unique())
+        date_to_idx = {d: i for i, d in enumerate(date_list)}
         
-        # Адаптивная минимальная выработка
-        min_hours_per_waiter = int(MIN_HOURS_PER_MONTH * num_days / 30)
-        
-        max_possible_hours = estimated_total_hours
-        min_required_total = min_hours_per_waiter * num_waiters
-        
-        # Если требование превышает возможное — снижаем пропорционально
-        if min_required_total > max_possible_hours * 1.5:
-            scale_factor = (max_possible_hours * 1.5) / min_required_total
-            min_hours_per_waiter = int(min_hours_per_waiter * scale_factor)
-            if verbose:
-                print(f"\nПотребность низкая — мин. выработка снижена:")
-                print(f"   Было: {int(MIN_HOURS_PER_MONTH * num_days / 30)}ч")
-                print(f"   Стало: {min_hours_per_waiter}ч (масштаб: {scale_factor:.2f})")
-        
-        # Целевое количество часов
-        target_hours = max(min_hours_per_waiter, estimated_total_hours // num_waiters)
-        
-        if verbose:
-            print(f"\nЦелевые показатели:")
-            print(f"   Общая потребность: ~{estimated_total_hours} часов")
-            print(f"   Минимум часов/официант: {min_hours_per_waiter}")
-            print(f"   Целевое часов/официант: ~{target_hours}")
-        
-        # Создаём модель оптимизации
         model = cp_model.CpModel()
         
-        # ПЕРЕМЕННЫЕ: shift[(waiter, day, shift_type)] = BoolVar
-        shift = {}
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days):
-                for s in [1, 2, 3]:  # 1=Полная, 2=Утренняя, 3=Вечерняя
-                    shift[(w, d, s)] = model.NewBoolVar(f'shift_w{w}_d{d}_s{s}')
+        # ПЕРЕМЕННЫЕ
         
-        # Переменные для часов работы каждого официанта
+        is_active = [model.NewBoolVar(f'active_{w}') for w in range(max_waiters)]
+        model.Add(sum(is_active) >= MIN_WAITERS_ABSOLUTE)
+        
+        shift = {}
+        for w in range(max_waiters):
+            for d in range(num_days):
+                for s in [1, 2, 3]:
+                    var = model.NewBoolVar(f'shift_w{w}_d{d}_s{s}')
+                    shift[(w, d, s)] = var
+                    model.Add(var <= is_active[w])
+        
         waiter_hours = {}
-        for w in range(1, num_waiters + 1):
-            waiter_hours[w] = model.NewIntVar(0, num_days * 13, f'hours_w{w}')
-            
-            hour_expr = sum(
+        for w in range(max_waiters):
+            expr = sum(
                 SHIFT_TYPES['full']['hours'] * shift[(w, d, 1)] +
                 SHIFT_TYPES['morning']['hours'] * shift[(w, d, 2)] +
                 SHIFT_TYPES['evening']['hours'] * shift[(w, d, 3)]
                 for d in range(num_days)
             )
-            model.Add(waiter_hours[w] == hour_expr)
+            waiter_hours[w] = model.NewIntVar(0, num_days * 13, f'hours_w{w}')
+            model.Add(waiter_hours[w] == expr)
+        
+        # ПЕРЕМЕННЫЕ ДЛЯ БАЛАНСИРОВКИ СМЕН
+        waiter_shifts = {}
+        for w in range(max_waiters):
+            expr = sum(
+                shift[(w, d, s)]
+                for d in range(num_days)
+                for s in [1, 2, 3]
+            )
+            waiter_shifts[w] = model.NewIntVar(0, num_days, f'shifts_w{w}')
+            model.Add(waiter_shifts[w] == expr)
+        
+        # РАСЧЁТЫ
+        
+        total_guests = df['guests'].sum()
+        max_total_hours = int(np.ceil(total_guests / 3))
         
         # ОГРАНИЧЕНИЯ
         
-        # 1. Одна смена в день максимум
-        for w in range(1, num_waiters + 1):
+        # 1. Одна смена в день
+        for w in range(max_waiters):
             for d in range(num_days):
                 model.Add(sum(shift[(w, d, s)] for s in [1, 2, 3]) <= 1)
         
-        # 2. Покрытие потребности в официантах (упрощённо)
-        for d in range(num_days):
-            day_need = daily_req.loc[daily_req['date'] == date_list[d], 'waiters_max'].values
-            need = int(day_need[0]) if len(day_need) > 0 else self.min_waiters_per_shift
-            
-            # Считаем покрытие: каждый специалист = 2 "единицы", новичок = 1
-            coverage = sum(
-                (2 if waiter_config[w] == 'specialist' else 1) * 
-                sum(shift[(w, d, s)] for s in [1, 2, 3])
-                for w in range(1, num_waiters + 1)
-            )
-            
-            # Требуемое покрытие в "единицах"
-            required = need * 2  # консервативно: считаем всех как новичков
-            
-            model.Add(coverage >= required)
-        
-        # 3. Минимальная выработка (адаптивная)
-        for w in range(1, num_waiters + 1):
-            model.Add(waiter_hours[w] >= min_hours_per_waiter)
-        
-        # 4. Максимум часов в неделю
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days - 6):
-                weekly_hours = sum(
-                    SHIFT_TYPES['full']['hours'] * shift[(w, i, 1)] +
-                    SHIFT_TYPES['morning']['hours'] * shift[(w, i, 2)] +
-                    SHIFT_TYPES['evening']['hours'] * shift[(w, i, 3)]
-                    for i in range(d, d + 7)
+        # 2. Почасовое покрытие
+        for day in date_list:
+            day_idx = date_to_idx[day]
+            day_data = df[df['date'] == day]
+            for hour in range(self.work_start, self.work_end):
+                hour_data = day_data[day_data['hour'] == hour]
+                if len(hour_data) == 0:
+                    continue
+                guests = hour_data['guests'].values[0]
+                if guests <= 0:
+                    continue
+                needed = int(np.ceil(guests / 7.5))
+                coverage = sum(
+                    shift[(w, day_idx, s)]
+                    for w in range(max_waiters)
+                    for s in [1, 2, 3]
+                    if get_shift_for_hour(s, hour)
                 )
-                model.Add(weekly_hours <= self.max_work_hours_per_week)
+                model.Add(coverage >= needed)
+        
+        # 3. Минимум часов
+        if best_effort:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= 0 * is_active[w])
+                model.Add(waiter_hours[w] <= num_days * 13 * is_active[w])
+        else:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= min_hours * is_active[w])
+                model.Add(waiter_hours[w] <= num_days * 13 * is_active[w])
+        
+        # 4. Максимум 48 часов в неделю
+        for w in range(max_waiters):
+            for start_day in range(num_days - 6):
+                weekly = sum(
+                    SHIFT_TYPES['full']['hours'] * shift[(w, d, 1)] +
+                    SHIFT_TYPES['morning']['hours'] * shift[(w, d, 2)] +
+                    SHIFT_TYPES['evening']['hours'] * shift[(w, d, 3)]
+                    for d in range(start_day, start_day + 7)
+                )
+                model.Add(weekly <= self.max_weekly_hours)
         
         # 5. Минимум 1 выходной в 7 дней
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days - 6):
-                model.Add(
-                    sum(sum(shift[(w, i, s)] for s in [1, 2, 3]) for i in range(d, d + 7)) <= 6
+        for w in range(max_waiters):
+            for start_day in range(num_days - 6):
+                working = sum(
+                    sum(shift[(w, d, s)] for s in [1, 2, 3])
+                    for d in range(start_day, start_day + 7)
                 )
+                model.Add(working <= 6)
         
-        # ЦЕЛЕВАЯ ФУНКЦИЯ: минимизировать дисбаланс часов
+        # 6. БАЛАНСИРОВКА СМЕН: разница не более 5 смен между любыми двумя активными официантами
+        for w1 in range(max_waiters):
+            for w2 in range(w1 + 1, max_waiters):
+                # Разница в сменах <= 5 (для активных)
+                model.Add(waiter_shifts[w1] - waiter_shifts[w2] <= 5 + (1 - is_active[w1]) * num_days)
+                model.Add(waiter_shifts[w2] - waiter_shifts[w1] <= 5 + (1 - is_active[w2]) * num_days)
         
-        # 1. Одна смена в день максимум
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days):
-                model.Add(sum(shift[(w, d, s)] for s in [1, 2, 3]) <= 1)
+        # Ограничение сверху
+        model.Add(sum(waiter_hours[w] for w in range(max_waiters)) <= max_total_hours)
         
-        # 2. Покрытие потребности (упрощённо)
-        for d in range(num_days):
-            day_need = daily_req.loc[daily_req['date'] == date_list[d], 'waiters_max'].values
-            need = int(day_need[0]) if len(day_need) > 0 else self.min_waiters_per_shift
+        # ЦЕЛЕВАЯ ФУНКЦИЯ
+        
+        if best_effort:
+            target_hours = min_hours
             
-            coverage = sum(
-                (2 if waiter_config[w] == 'specialist' else 1) * 
-                sum(shift[(w, d, s)] for s in [1, 2, 3])
-                for w in range(1, num_waiters + 1)
+            under_hours = []
+            for w in range(max_waiters):
+                dev = model.NewIntVar(0, target_hours, f'under_w{w}')
+                model.Add(dev >= target_hours - waiter_hours[w])
+                model.Add(dev >= 0)
+                model.Add(dev <= target_hours * is_active[w])
+                under_hours.append(dev)
+            
+            # Добавляем штраф за разбалансировку смен
+            shift_imbalance = []
+            for w1 in range(max_waiters):
+                for w2 in range(w1 + 1, max_waiters):
+                    diff = model.NewIntVar(0, num_days, f'diff_w{w1}_w{w2}')
+                    model.Add(diff >= waiter_shifts[w1] - waiter_shifts[w2])
+                    model.Add(diff >= waiter_shifts[w2] - waiter_shifts[w1])
+                    shift_imbalance.append(diff)
+            
+            # Целевая: минимум официантов + штраф за недобор + штраф за разбалансировку
+            model.Minimize(
+                sum(is_active) * 10 + 
+                sum(under_hours) * 0.01 +
+                sum(shift_imbalance) * 0.1
             )
-            
-            required = need * 2
-            model.Add(coverage >= required)
+        else:
+            model.Minimize(sum(is_active))
         
-        # 3. Минимальная выработка (адаптивная)
-        for w in range(1, num_waiters + 1):
-            model.Add(waiter_hours[w] >= min_hours_per_waiter)
-        
-        # 4. Максимум часов в неделю
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days - 6):
-                weekly_hours = sum(
-                    SHIFT_TYPES['full']['hours'] * shift[(w, i, 1)] +
-                    SHIFT_TYPES['morning']['hours'] * shift[(w, i, 2)] +
-                    SHIFT_TYPES['evening']['hours'] * shift[(w, i, 3)]
-                    for i in range(d, d + 7)
-                )
-                model.Add(weekly_hours <= self.max_work_hours_per_week)
-        
-        # 5. Минимум 1 выходной в 7 дней
-        for w in range(1, num_waiters + 1):
-            for d in range(num_days - 6):
-                model.Add(
-                    sum(sum(shift[(w, i, s)] for s in [1, 2, 3]) for i in range(d, d + 7)) <= 6
-                )
-        
-        # 6. Ограничение: минимум 50% полных смен (было 70%)
-        for w in range(1, num_waiters + 1):
-            total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
-            full_shifts_w = sum(shift[(w, d, 1)] for d in range(num_days))
-            
-            # Полные смены >= 50% от всех смен
-            model.Add(full_shifts_w * 2 >= total_shifts_w)
-        
-        # 7. Ограничение: максимум 30% утренних смен (было 20%)
-        for w in range(1, num_waiters + 1):
-            total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
-            morning_shifts_w = sum(shift[(w, d, 2)] for d in range(num_days))
-            
-            # Утренние <= 30% от всех смен
-            model.Add(morning_shifts_w * 10 <= total_shifts_w * 3)
-        
-        # 8. Ограничение: максимум 30% вечерних смен (было 20%)
-        for w in range(1, num_waiters + 1):
-            total_shifts_w = sum(shift[(w, d, s)] for d in range(num_days) for s in [1, 2, 3])
-            evening_shifts_w = sum(shift[(w, d, 3)] for d in range(num_days))
-            
-            # Вечерние <= 30% от всех смен
-            model.Add(evening_shifts_w * 10 <= total_shifts_w * 3)
-        
-        # ЦЕЛЕВАЯ ФУНКЦИЯ: только баланс часов (без штрафов за тип смены)
-        
-        imbalance_vars = []
-        for w in range(1, num_waiters + 1):
-            deviation = model.NewIntVar(0, num_days * 13, f'deviation_w{w}')
-            model.AddAbsEquality(deviation, waiter_hours[w] - target_hours)
-            imbalance_vars.append(deviation)
-        
-        total_imbalance = sum(imbalance_vars)
-        
-        # Минимизируем только дисбаланс часов
-        model.Minimize(total_imbalance)
-        
-        # РЕШЕНИЕ
-        
-        if verbose:
-            print("\nРешение оптимизационной задачи...")
+        # СОЛВЕР
         
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 45.0 
+        solver.parameters.max_time_in_seconds = 60.0
         solver.parameters.num_search_workers = 8
         solver.parameters.cp_model_presolve = True
         solver.parameters.linearization_level = 1
         
-        status = solver.Solve(model)
+        return model, solver, {
+            'is_active': is_active,
+            'shift': shift,
+            'waiter_hours': waiter_hours,
+            'waiter_shifts': waiter_shifts, 
+            'date_list': date_list,
+            'num_days': num_days,
+            'max_waiters': max_waiters,
+            'target_hours': min_hours if best_effort else None
+        }
+    
+    def _extract_solution(
+        self,
+        solver: cp_model.CpSolver,
+        vars_dict: Dict,
+        df: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, Dict]:  
+        is_active = vars_dict['is_active']
+        shift = vars_dict['shift']
+        date_list = vars_dict['date_list']
+        num_days = vars_dict['num_days']
+        max_waiters = vars_dict['max_waiters']
         
-        # Обработка статусов
-        if status == cp_model.OPTIMAL:
-            if verbose:
-                print(f"OPTIMAL: найдено оптимальное решение")
-        elif status == cp_model.FEASIBLE:
-            if verbose:
-                print(f"FEASIBLE: найдено допустимое решение (не оптимальное)")
-        elif status == cp_model.UNKNOWN:
-            if verbose:
-                print(f"UNKNOWN: время вышло, используется лучшее найденное")
-        else:
-            if verbose:
-                print(f"{solver.StatusName(status)}: не удалось найти решение")
-            return None, {}
+        # Активные официанты
+        active_waiters = [w for w in range(max_waiters) if solver.Value(is_active[w]) == 1]
+        num_active = len(active_waiters)
+
+        num_novices = int(np.ceil(num_active * self.novice_ratio))
+        num_specialists = num_active - num_novices
+                
+        if self.verbose:
+            print(f"Активные официанты: {len(active_waiters)}")
         
-        # СОЗДАНИЕ РАСПИСАНИЯ
-        
+        # Генерируем расписание
         schedule_data = []
         
-        # Словарь для быстрого доступа по коду смены
         SHIFT_INFO = {
             1: {'name': 'Полная', 'start': 10, 'end': 22, 'hours': 12},
             2: {'name': 'Утренняя', 'start': 10, 'end': 16, 'hours': 6},
             3: {'name': 'Вечерняя', 'start': 16, 'end': 25, 'hours': 9},
         }
         
-        for w in range(1, num_waiters + 1):
-            waiter_type = waiter_config[w]
+        for w in active_waiters:
+            # Первые specialists — специалисты, остальные — новички
+            waiter_type = 'novice' if w >= num_specialists else 'specialist'
+
             
             for d in range(num_days):
-                shift_type_code = 0
+                shift_code = 0
                 shift_name = 'Выходной'
-                work_start = None
-                work_end = None
+                work_start = work_end = None
                 work_hours = 0
                 
-                # Определяем назначенную смену
                 for s in [1, 2, 3]:
                     if solver.Value(shift[(w, d, s)]) == 1:
-                        shift_type_code = s
+                        shift_code = s
                         shift_name = SHIFT_INFO[s]['name']
                         work_start = SHIFT_INFO[s]['start']
                         work_end = SHIFT_INFO[s]['end']
@@ -414,259 +362,458 @@ class WaiterScheduler:
                         break
                 
                 # Потребность в этот день
-                day_req = daily_req[daily_req['date'] == date_list[d]]
-                waiters_needed = int(day_req['waiters_max'].values[0]) if len(day_req) > 0 else self.min_waiters_per_shift
+                day_data = df[df['date'] == date_list[d]]
+                day_guests = day_data['guests'].max() if len(day_data) > 0 else 0
                 
                 schedule_data.append({
                     'date': date_list[d],
-                    'waiter_id': f'Официант {w}',
-                    'waiter_num': w,
+                    'waiter_id': f'Официант {w+1}',
+                    'waiter_num': w+1,
                     'waiter_type': WAITER_TYPES[waiter_type]['name'],
                     'waiter_type_code': WAITER_TYPES[waiter_type]['code'],
                     'waiter_capacity': WAITER_TYPES[waiter_type]['capacity'],
-                    'shift_type_code': shift_type_code,
+                    'shift_type_code': shift_code,
                     'shift_type': shift_name,
                     'work_start': work_start,
                     'work_end': work_end,
                     'work_hours': work_hours,
-                    'waiters_needed': waiters_needed
+                    'guests_predicted': day_guests
                 })
         
         schedule_df = pd.DataFrame(schedule_data)
         
         # Статистика
-        total_assigned = (schedule_df['shift_type_code'] > 0).sum()
         total_hours = schedule_df['work_hours'].sum()
+        hours_per_waiter = schedule_df.groupby('waiter_num')['work_hours'].sum()
+        
+        # Подсчёт смен по типам
+        shifts_per_waiter = schedule_df.groupby('waiter_num').apply(
+            lambda x: pd.Series({
+                'total_shifts': (x['shift_type_code'] > 0).sum(),
+                'full_shifts': (x['shift_type_code'] == 1).sum(),
+                'morning_shifts': (x['shift_type_code'] == 2).sum(),
+                'evening_shifts': (x['shift_type_code'] == 3).sum(),
+            })
+        ).to_dict('index')
         
         stats = {
-            'total_waiters': num_waiters,
-            'total_days': num_days,
-            'total_shifts': int(total_assigned),
+            'num_waiters': len(active_waiters),
+            'num_specialists': num_specialists,  
+            'num_novices': num_novices, 
+            'novice_ratio': self.novice_ratio, 
             'total_hours': int(total_hours),
+            'total_shifts': int((schedule_df['shift_type_code'] > 0).sum()),
+            'avg_hours_per_waiter': float(total_hours / len(active_waiters)) if active_waiters else 0,
+            'min_hours': int(hours_per_waiter.min()) if len(hours_per_waiter) > 0 else 0,
+            'max_hours': int(hours_per_waiter.max()) if len(hours_per_waiter) > 0 else 0,
+            'all_met_min': bool((hours_per_waiter >= self.min_hours).all()),
             'full_shifts': int((schedule_df['shift_type_code'] == 1).sum()),
             'morning_shifts': int((schedule_df['shift_type_code'] == 2).sum()),
             'evening_shifts': int((schedule_df['shift_type_code'] == 3).sum()),
-            'avg_hours_per_waiter': float(total_hours / num_waiters) if num_waiters > 0 else 0,
-            'min_hours_met': bool(schedule_df.groupby('waiter_num')['work_hours'].sum().min() >= min_hours_per_waiter),
-            'status': solver.StatusName(status)
+            'shifts_per_waiter': shifts_per_waiter, 
+            'hours_per_waiter': hours_per_waiter.to_dict(), 
         }
-        
-        if verbose:
-            print(f"\nРезультаты:")
-            print(f"   Всего смен: {stats['total_shifts']}")
-            print(f"     Полных: {stats['full_shifts']}")
-            print(f"     Утренних: {stats['morning_shifts']}")
-            print(f"     Вечерних: {stats['evening_shifts']}")
-            print(f"   Всего часов: {stats['total_hours']}")
-            print(f"   Часов на официанта: {stats['avg_hours_per_waiter']:.1f}")
-            print(f"   Минимум {min_hours_per_waiter}ч: {'1' if stats['min_hours_met'] else '0'}")
         
         return schedule_df, stats
     
-    def print_schedule_summary(self, schedule_df: pd.DataFrame, min_hours: int):        
-        print("КРАТКАЯ СВОДКА РАСПИСАНИЯ")
+    def print_waiter_summary(self, schedule_df: pd.DataFrame, stats: Dict):
         
-        print("\nПо официантам:")
-        waiter_stats = schedule_df.groupby(['waiter_id', 'waiter_type']).agg({
-            'shift_type_code': lambda x: (x > 0).sum(),
-            'work_hours': 'sum'
-        }).reset_index()
-        waiter_stats.columns = ['Официант', 'Тип', 'Смен', 'Часов']
-        waiter_stats['% от мин.'] = (waiter_stats['Часов'] / min_hours * 100).round(1)
-        waiter_stats['Статус'] = waiter_stats['Часов'].apply(
-            lambda h: '1' if h >= min_hours else '0'
-        )
-        print(waiter_stats.to_string(index=False))
+        if schedule_df.empty:
+            print("Расписание пустое")
+            return
         
-        print("\nРаспределение типов смен:")
-        shift_counts = schedule_df[schedule_df['shift_type_code'] > 0].groupby('shift_type').size()
-        for shift_type, count in shift_counts.items():
-            print(f"   {shift_type}: {count} смен")
+        print("СВОДКА ПО ОФИЦИАНТАМ")
         
-        print("\nРаспределение по типам официантов:")
-        type_stats = schedule_df[schedule_df['shift_type_code'] > 0].groupby('waiter_type').agg({
-            'work_hours': 'sum',
-            'shift_type_code': 'count'
-        })
-        type_stats.columns = ['Часов', 'Смен']
-        print(type_stats.to_string())
+        print(f"\n{'Официант':<12} {'Тип':<12} {'Смен':<8} {'Полн':<6} {'Утр':<5} {'Веч':<5} {'Часов':<8} {'Ср. ч/смену':<12}")
+        print("-" * 70)
         
-        self.print_waiter_statistics(schedule_df, min_hours)
-    
-    def export_schedule(
-        self,
-        schedule_df: pd.DataFrame,
-        output_path: str = None,
-        format: str = 'csv',
-        verbose: bool = True
-    ) -> str:
-        if output_path is None:
-            output_path = Path('data/predicted/waiter_schedule.csv')
-        else:
-            output_path = Path(output_path)
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        if format == 'csv':
-            schedule_df.to_csv(output_path, index=False, encoding='utf-8-sig')
-        elif format == 'excel':
-            schedule_df.to_excel(output_path.with_suffix('.xlsx'), index=False)
-        elif format == 'json':
-            schedule_df.to_json(output_path.with_suffix('.json'), orient='records', force_ascii=False, indent=2)
-        
-        if verbose:
-            print(f"\nРасписание сохранено: {output_path.absolute()}")
-        
-        return str(output_path.absolute())
-
-    def print_waiter_statistics(self, schedule_df: pd.DataFrame, min_hours: int):
-        print("ПОДРОБНАЯ СТАТИСТИКА ПО ОФИЦИАНТАМ")
-        
-        # Группируем по официантам
-        waiter_groups = schedule_df.groupby('waiter_num')
-        
-        for waiter_num, group in waiter_groups:
+        shifts_list = []
+        for waiter_num, group in schedule_df.groupby('waiter_num'):
             waiter_id = group['waiter_id'].iloc[0]
             waiter_type = group['waiter_type'].iloc[0]
-            capacity = group['waiter_capacity'].iloc[0]
             
-            # Общая статистика
             total_shifts = (group['shift_type_code'] > 0).sum()
-            total_hours = group['work_hours'].sum()
-            days_worked = total_shifts
-            days_off = len(group) - total_shifts
-            
-            # Статус выполнения нормы
-            status = '1' if total_hours >= min_hours else '0'
-            percent_of_min = (total_hours / min_hours * 100) if min_hours > 0 else 0
-            
-            # Распределение по типам смен
             full_shifts = (group['shift_type_code'] == 1).sum()
             morning_shifts = (group['shift_type_code'] == 2).sum()
             evening_shifts = (group['shift_type_code'] == 3).sum()
+            total_hours = group['work_hours'].sum()
+            avg_per_shift = total_hours / total_shifts if total_shifts > 0 else 0
             
-            # Распределение по дням недели
-            group_copy = group.copy()
-            group_copy['day_of_week'] = pd.to_datetime(group_copy['date']).dt.day_name()
-            shifts_by_day = group_copy[group_copy['shift_type_code'] > 0].groupby('day_of_week').size()
+            shifts_list.append(total_shifts)
             
-            # Вывод информации по официанту
-            print(f"\n{'─' * 70}")
-            print(f"{waiter_id} | {waiter_type} ({capacity} гостей/час) {status}")
-            print(f"{'─' * 70}")
+            print(f"{waiter_id:<12} {waiter_type:<12} {total_shifts:<8} {full_shifts:<6} {morning_shifts:<5} {evening_shifts:<5} {total_hours:<8} {avg_per_shift:<12.1f}")
+        
+        print("-" * 70)
+        
+        # Статистика балансировки
+        if len(shifts_list) > 1:
+            min_shifts = min(shifts_list)
+            max_shifts = max(shifts_list)
+            avg_shifts = sum(shifts_list) / len(shifts_list)
+            imbalance = max_shifts - min_shifts
             
-            print(f"Общая статистика:")
-            print(f"   Всего дней в периоде: {len(group)}")
-            print(f"   Рабочих дней: {days_worked}")
-            print(f"   Выходных: {days_off}")
-            print(f"   Всего часов: {total_hours}")
-            print(f"   Норма ({min_hours}ч): {percent_of_min:.1f}% {status}")
+            print(f"\nБалансировка смен:")
+            print(f"   Мин смен: {min_shifts}, Макс смен: {max_shifts}")
+            print(f"   Среднее: {avg_shifts:.1f}, Разброс: {imbalance} смен")
             
-            print(f"\nТипы смен:")
-            print(f"   Полные (13ч):   {full_shifts:>3} смен  ({full_shifts * 13:>3} ч)")
-            print(f"   Утренние (6ч):  {morning_shifts:>3} смен  ({morning_shifts * 6:>3} ч)")
-            print(f"   Вечерние (7ч):  {evening_shifts:>3} смен  ({evening_shifts * 7:>3} ч)")
+            if imbalance <= 3:
+                print(f"   Отличная балансировка (≤3)")
+            elif imbalance <= 5:
+                print(f"   Хорошая балансировка (≤5)")
+            else:
+                print(f"   Разбалансировка (>5)")
+        
+        # Итого
+        total_shifts = (schedule_df['shift_type_code'] > 0).sum()
+        total_hours = schedule_df['work_hours'].sum()
+        print(f"\n{'ВСЕГО':<12} {'':<12} {total_shifts:<8} {stats.get('full_shifts', 0):<6} {stats.get('morning_shifts', 0):<5} {stats.get('evening_shifts', 0):<5} {total_hours:<8} {total_hours/total_shifts if total_shifts > 0 else 0:<12.1f}")
+        
+        # Распределение по типам смен
+        print(f"\nРаспределение смен:")
+        print(f"   Полные (12ч):   {stats.get('full_shifts', 0):>3} ({stats.get('full_shifts', 0)/total_shifts*100 if total_shifts > 0 else 0:.1f}%)")
+        print(f"   Утренние (6ч):  {stats.get('morning_shifts', 0):>3} ({stats.get('morning_shifts', 0)/total_shifts*100 if total_shifts > 0 else 0:.1f}%)")
+        print(f"   Вечерние (9ч):  {stats.get('evening_shifts', 0):>3} ({stats.get('evening_shifts', 0)/total_shifts*100 if total_shifts > 0 else 0:.1f}%)")
+        
+        # По типам официантов
+        print(f"\nПо типам официантов:")
+        type_summary = schedule_df[schedule_df['shift_type_code'] > 0].groupby('waiter_type').agg({
+            'work_hours': 'sum',
+            'shift_type_code': 'count'
+        })
+        for waiter_type, row in type_summary.iterrows():
+            print(f"   {waiter_type:<12}: {int(row['work_hours']):>4} ч, {int(row['shift_type_code']):>3} смен")
+    
+    def _create_model_relaxed(
+        self,
+        df: pd.DataFrame,
+        max_waiters: int,
+        min_hours: int,
+        best_effort: bool = None
+    ) -> Tuple[cp_model.CpModel, cp_model.CpSolver, Dict]:
+        
+        if best_effort is None:
+            best_effort = self.best_effort
+        
+        num_days = df['date'].nunique()
+        date_list = sorted(df['date'].unique())
+        date_to_idx = {d: i for i, d in enumerate(date_list)}
+        
+        model = cp_model.CpModel()
+        
+        # Переменные
+        is_active = [model.NewBoolVar(f'active_{w}') for w in range(max_waiters)]
+        model.Add(sum(is_active) >= MIN_WAITERS_ABSOLUTE)
+        
+        shift = {}
+        for w in range(max_waiters):
+            for d in range(num_days):
+                for s in [1, 2, 3]:
+                    var = model.NewBoolVar(f'shift_w{w}_d{d}_s{s}')
+                    shift[(w, d, s)] = var
+                    model.Add(var <= is_active[w])
+        
+        waiter_hours = {}
+        for w in range(max_waiters):
+            expr = sum(
+                SHIFT_TYPES['full']['hours'] * shift[(w, d, 1)] +
+                SHIFT_TYPES['morning']['hours'] * shift[(w, d, 2)] +
+                SHIFT_TYPES['evening']['hours'] * shift[(w, d, 3)]
+                for d in range(num_days)
+            )
+            waiter_hours[w] = model.NewIntVar(0, num_days * 13, f'hours_w{w}')
+            model.Add(waiter_hours[w] == expr)
+        
+        # Переменные для балансировки смен
+        waiter_shifts = {}
+        for w in range(max_waiters):
+            expr = sum(
+                shift[(w, d, s)]
+                for d in range(num_days)
+                for s in [1, 2, 3]
+            )
+            waiter_shifts[w] = model.NewIntVar(0, num_days, f'shifts_w{w}')
+            model.Add(waiter_shifts[w] == expr)
+        
+        # Расчёты
+        total_guests = df['guests'].sum()
+        max_total_hours = int(np.ceil(total_guests / 3))
+        
+        # Ограничения (только ключевые)
+        for w in range(max_waiters):
+            for d in range(num_days):
+                model.Add(sum(shift[(w, d, s)] for s in [1, 2, 3]) <= 1)
+        
+        for day in date_list:
+            day_idx = date_to_idx[day]
+            day_data = df[df['date'] == day]
+            for hour in range(self.work_start, self.work_end):
+                hour_data = day_data[day_data['hour'] == hour]
+                if len(hour_data) == 0:
+                    continue
+                guests = hour_data['guests'].values[0]
+                if guests <= 0:
+                    continue
+                needed = int(np.ceil(guests / 7.5))
+                coverage = sum(
+                    shift[(w, day_idx, s)]
+                    for w in range(max_waiters)
+                    for s in [1, 2, 3]
+                    if get_shift_for_hour(s, hour)
+                )
+                model.Add(coverage >= needed)
+        
+        # Минимум часов
+        if best_effort:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= 0)
+        else:
+            for w in range(max_waiters):
+                model.Add(waiter_hours[w] >= min_hours * is_active[w])
+        
+        # БАЛАНСИРОВКА СМЕН: разница не более 5 смен
+        for w1 in range(max_waiters):
+            for w2 in range(w1 + 1, max_waiters):
+                model.Add(waiter_shifts[w1] - waiter_shifts[w2] <= 5)
+                model.Add(waiter_shifts[w2] - waiter_shifts[w1] <= 5)
+        
+        # Ограничение сверху
+        model.Add(sum(waiter_hours[w] for w in range(max_waiters)) <= max_total_hours)
+        
+        # Целевая функция
+        if best_effort:
+            target_hours = min_hours
+            under_hours = []
+            for w in range(max_waiters):
+                dev = model.NewIntVar(0, target_hours, f'under_w{w}')
+                model.Add(dev >= target_hours - waiter_hours[w])
+                model.Add(dev >= 0)
+                model.Add(dev <= target_hours * is_active[w])
+                under_hours.append(dev)
             
-            print(f"\nПо дням недели:")
-            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            day_names_ru = {'Monday': 'Пн', 'Tuesday': 'Вт', 'Wednesday': 'Ср', 
-                           'Thursday': 'Чт', 'Friday': 'Пт', 'Saturday': 'Сб', 'Sunday': 'Вс'}
+            # Штраф за разбалансировку смен
+            shift_imbalance = []
+            for w1 in range(max_waiters):
+                for w2 in range(w1 + 1, max_waiters):
+                    diff = model.NewIntVar(0, num_days, f'diff_w{w1}_w{w2}')
+                    model.Add(diff >= waiter_shifts[w1] - waiter_shifts[w2])
+                    model.Add(diff >= waiter_shifts[w2] - waiter_shifts[w1])
+                    shift_imbalance.append(diff)
             
-            for day_en in day_order:
-                count = shifts_by_day.get(day_en, 0)
-                bar = '-' * count
-                print(f"   {day_names_ru[day_en]:<4}: {count:>2} смен  {bar}")
+            model.Minimize(
+                sum(is_active) * 10 + 
+                sum(under_hours) * 0.01 +
+                sum(shift_imbalance) * 0.1
+            )
+        else:
+            model.Minimize(sum(is_active))
+        
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 30.0
+        solver.parameters.num_search_workers = 4
+        solver.parameters.cp_model_presolve = True
+        solver.parameters.linearization_level = 1
+        
+        return model, solver, {
+            'is_active': is_active,
+            'shift': shift,
+            'waiter_hours': waiter_hours,
+            'waiter_shifts': waiter_shifts,
+            'date_list': date_list,
+            'num_days': num_days,
+            'max_waiters': max_waiters,
+            'target_hours': min_hours if best_effort else None
+        }
+    
+    def create_schedule(
+        self,
+        forecast_df: pd.DataFrame,
+        verbose: Optional[bool] = None
+    ) -> Tuple[pd.DataFrame, Dict]:
+        
+        if verbose is not None:
+            self.verbose = verbose
+        
+        if self.verbose:
+            print("ПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
+            if self.best_effort:
+                print("Режим: best effort (максимально близко к норме)")
+        
+        df = self._prepare_data(forecast_df)
+        num_days = df['date'].nunique()
+        
+        # РАСЧЁТ КОЛИЧЕСТВА МЕСЯЦЕВ
+        num_months = num_days / 30.0  # Примерно дней в месяце
+        
+        if self.verbose:
+            print(f"Период: {num_days} дней (~{num_months:.1f} месяцев)")
+            print(f"Пиковая нагрузка: {df['guests'].max()} гостей/час")
+            print(f"Минимум официантов: {MIN_WAITERS_ABSOLUTE}")
+        
+        # АДАПТАЦИЯ НОРМЫ ЧАСОВ ПО МЕСЯЦАМ
+        # Норма = min_hours_per_month × количество месяцев
+        total_min_hours = int(self.min_hours * num_months)
+        
+        if self.verbose:
+            print(f"Норма часов: {self.min_hours}ч/мес × {num_months:.1f}мес = {total_min_hours}ч")
+        
+        # Оценка с учётом адаптированной нормы
+        max_waiters, suggested_min_hours, is_feasible = estimate_max_waiters(df, total_min_hours)
+        
+        # Адаптация нормы
+        actual_min_hours = total_min_hours
+        if total_min_hours > suggested_min_hours:
+            if self.verbose:
+                print(f"\nАдаптация нормы: {total_min_hours}ч → {suggested_min_hours}ч")
+            actual_min_hours = suggested_min_hours
+        
+        # Создание модели с адаптированной нормой
+        model, solver, vars_dict = self._create_model(
+            df, max_waiters, actual_min_hours, best_effort=self.best_effort
+        )
+        
+        if self.verbose:
+            print(f"\nРешение (таймаут: 60с)...")
+        
+        status = solver.Solve(model)
+        
+        # Обработка INFEASIBLE в best effort
+        if status == cp_model.INFEASIBLE and self.best_effort:
+            if self.verbose:
+                print("INFEASIBLE — пробую упрощённую best effort модель...")
             
-            # Календарь смен (первые 14 дней для компактности)
-            print(f"\nКалендарь смен (первые 14 дней):")
-            print(f"   {'Дата':<12} {'День':<4} {'Смена':<10} {'Часы':<6} {'Время':<12}")
-            print(f"   {'─' * 46}")
+            fallback_min_hours = max(10, int(actual_min_hours * 0.3))
+            if self.verbose:
+                print(f"Повтор с нормой: {fallback_min_hours}ч (best effort)")
             
-            for _, row in group.head(14).iterrows():
-                date_str = pd.to_datetime(row['date']).strftime('%Y-%m-%d')
-                day_name = pd.to_datetime(row['date']).strftime('%a')
-                shift = row['shift_type']
-                hours = row['work_hours']
+            model, solver, vars_dict = self._create_model_relaxed(
+                df, max_waiters, fallback_min_hours, best_effort=True
+            )
+            actual_min_hours = fallback_min_hours
+            status = solver.Solve(model)
+            
+            # Если всё ещё INFEASIBLE — пробуем БЕЗ штрафа за недобор
+            if status == cp_model.INFEASIBLE:
+                if self.verbose:
+                    print("Всё ещё INFEASIBLE — пробую модель БЕЗ штрафа за недобор...")
                 
-                if row['shift_type_code'] > 0:
-                    start = int(row['work_start'])
-                    end = int(row['work_end'])
-                    
-                    # Обработка перехода через полночь
-                    if end > 24:
-                        end_display = end - 24
-                        time_str = f"{start}:00-{end_display}:00+1"
-                    else:
-                        time_str = f"{start}:00-{end}:00"
-                else:
-                    time_str = '—'
-                
-                print(f"   {date_str:<12} {day_name:<4} {shift:<10} {hours:>2} ч    {time_str:<12}")
+                model, solver, vars_dict = self._create_model_relaxed(
+                    df, max_waiters, 0, best_effort=False
+                )
+                status = solver.Solve(model)
+        
+        # Окончательная обработка
+        if status == cp_model.OPTIMAL:
+            if self.verbose:
+                print("OPTIMAL: найдено оптимальное решение")
+        elif status == cp_model.FEASIBLE:
+            if self.verbose:
+                print("FEASIBLE: найдено допустимое решение")
+        elif status == cp_model.INFEASIBLE:
+            if self.verbose:
+                print("INFEASIBLE: не удалось найти решение даже в best effort")
+                print("Попробуйте:")
+                print("   Увеличить период прогноза")
+                print("   Проверить данные: нет ли аномально низкого прогноза")
+            return pd.DataFrame(), {}
+        else:
+            if self.verbose:
+                print(f"{solver.StatusName(status)}")
+            return pd.DataFrame(), {}
+        
+        # Извлечение решения
+        schedule_df, stats = self._extract_solution(solver, vars_dict, df)
+        
+        # Обновляем статистику с учётом месяцев
+        if self.best_effort and 'target_hours' in vars_dict:
+            stats['target_hours'] = vars_dict['target_hours']
+            stats['best_effort'] = True
+            stats['num_months'] = num_months
+            stats['min_hours_per_month'] = self.min_hours
+            stats['total_min_hours'] = total_min_hours
+        
+        if self.verbose and len(schedule_df) > 0:
+            print("РЕЗУЛЬТАТЫ:")
+            print(f"   Официантов: {stats['num_waiters']} (минимум {MIN_WAITERS_ABSOLUTE})")
+            print(f"   Всего часов: {stats['total_hours']}")
+            print(f"   Часов/официант: {stats['avg_hours_per_waiter']:.1f}")
             
-            if len(group) > 14:
-                print(f"   ... и ещё {len(group) - 14} дней")
-        
-        # Итоговая сводка
-        print("ИТОГО ПО ВСЕМ ОФИЦИАНТАМ")
-        
-        total_hours_all = schedule_df[schedule_df['shift_type_code'] > 0]['work_hours'].sum()
-        total_shifts_all = (schedule_df['shift_type_code'] > 0).sum()
-        avg_hours = total_hours_all / len(waiter_groups)
-        min_hours_actual = schedule_df.groupby('waiter_num')['work_hours'].sum().min()
-        max_hours_actual = schedule_df.groupby('waiter_num')['work_hours'].sum().max()
-        
-        print(f"Всего часов работы: {total_hours_all}")
-        print(f"Всего смен: {total_shifts_all}")
-        print(f"Среднее часов на официанта: {avg_hours:.1f}")
-        print(f"Минимум часов (официант): {min_hours_actual}")
-        print(f"Максимум часов (официант): {max_hours_actual}")
-        print(f"Разброс: {max_hours_actual - min_hours_actual} ч")
-        
-        # Проверка выполнения нормы всеми
-        all_met = schedule_df.groupby('waiter_num')['work_hours'].sum().min() >= min_hours
-        print(f"\nНорма {min_hours}ч выполнена всеми: {'Да' if all_met else 'Нет'}")
+            self.print_waiter_summary(schedule_df, stats)
 
+            if self.best_effort:
+                target = vars_dict.get('target_hours', actual_min_hours)
+                print(f"\nПериод: {num_months:.1f} месяцев")
+                print(f"Цель: {target}ч ({self.min_hours}ч/мес × {num_months:.1f}мес)")
+                print(f"   Фактически: {stats['avg_hours_per_waiter']:.1f}ч")
+                if stats['avg_hours_per_waiter'] >= target * 0.8:
+                    print(f"   Достигнуто ≥80% цели")
+                else:
+                    print(f"   Достигнуто {stats['avg_hours_per_waiter']/target*100:.0f}% цели")
+            else:
+                print(f"   Норма {actual_min_hours}ч: {'1' if stats['all_met_min'] else '0'}")
+        
+        return schedule_df, stats
+    
+    def print_summary(self, schedule_df: pd.DataFrame):
+        if schedule_df.empty:
+            print("Расписание пустое")
+            return
+        
+        print("СВОДКА ПО ОФИЦИАНТАМ")
+        
+        summary = schedule_df.groupby('waiter_id').agg({
+            'waiter_type': 'first',
+            'work_hours': 'sum',
+            'shift_type_code': lambda x: (x > 0).sum()
+        }).reset_index()
+        summary.columns = ['Официант', 'Тип', 'Часов', 'Смен']
+        summary['% нормы'] = (summary['Часов'] / self.min_hours * 100).round(1)
+        summary['Статус'] = summary['Часов'].apply(
+            lambda h: '1' if h >= self.min_hours else '0'
+        )
+        
+        print(summary.to_string(index=False))
+        
+        # Итого
+        total_hours = schedule_df['work_hours'].sum()
+        total_shifts = (schedule_df['shift_type_code'] > 0).sum()
+        print(f"\nВСЕГО: {total_hours} часов, {total_shifts} смен")
+
+
+# ВНЕШНИЙ ИНТЕРФЕЙС
 
 def create_waiter_schedule(
     forecast_path: str,
-    waiter_config: Dict[int, str],
-    output_path: str = None,
-    min_waiters_per_shift: int = 5,
-    max_hours_per_month: int = 200,
+    output_path: Optional[str] = None,
+    min_hours_per_waiter: int = MIN_HOURS_PER_MONTH,
+    best_effort: bool = True, 
+    novice_ratio: float = 0.5,
     verbose: bool = True
 ) -> Tuple[pd.DataFrame, Dict]:
-    # Загружаем прогноз
+    
     if verbose:
-        print(f"Загрузка прогноза из: {forecast_path}")
+        print(f"Загрузка прогноза: {forecast_path}")
     
     forecast_df = pd.read_csv(forecast_path, parse_dates=['datetime'])
     
-    if verbose:
-        print(f"Конфигурация официантов: {waiter_config}")
-    
-    # Создаём планировщик
+    # Создаём планировщик с best_effort
     scheduler = WaiterScheduler(
-        min_waiters_per_shift=min_waiters_per_shift
-    )
-    
-    # Создаём расписание
-    schedule_df, stats = scheduler.create_schedule(
-        forecast_df=forecast_df,
-        waiter_config=waiter_config,
+        min_hours_per_waiter=min_hours_per_waiter,
+        best_effort=best_effort, 
+        novice_ratio=novice_ratio,
         verbose=verbose
     )
     
-    if schedule_df is None or len(schedule_df) == 0:
-        if verbose:
-            print(f"\nНе удалось создать расписание — пропускаем сохранение")
-        return pd.DataFrame(), {}
+    # Генерация расписания
+    schedule_df, stats = scheduler.create_schedule(
+        forecast_df=forecast_df,
+        verbose=verbose
+    )
     
-    # Сохраняем расписание
-    if output_path:
+    # Сохранение
+    if output_path and not schedule_df.empty:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         schedule_df.to_csv(output_path, index=False, encoding='utf-8-sig')
-        
         if verbose:
             print(f"\nРасписание сохранено: {output_path}")
     
@@ -674,18 +821,20 @@ def create_waiter_schedule(
 
 
 if __name__ == '__main__':
-    # Тестовая конфигурация
-    waiter_config = {
-        1: 'specialist',
-        2: 'specialist',
-        3: 'specialist',
-        4: 'novice',
-        5: 'novice'
-    }
-    
+    # Тестовый запуск
     schedule_df, stats = create_waiter_schedule(
         forecast_path='data/predicted/forecast.csv',
-        waiter_config=waiter_config,
         output_path='data/predicted/waiter_schedule.csv',
+        min_hours_per_waiter=200,
         verbose=True
     )
+    
+    if not schedule_df.empty:
+        # Печать сводки
+        scheduler = WaiterScheduler()
+        scheduler.print_summary(schedule_df)
+        
+        # Пример: первые 20 строк расписания
+        print("ПРИМЕР РАСПИСАНИЯ (первые 20 строк):")
+        cols = ['date', 'waiter_id', 'shift_type', 'work_hours', 'guests_predicted']
+        print(schedule_df[cols].head(20).to_string(index=False))
