@@ -61,22 +61,15 @@
           <p><strong>Заведение:</strong> {{ currentVenueLabel }}</p>
         </div>
 
-        <section v-if="currentUserRole === 'admin'" class="data-upload-card">
-          <div class="data-upload-head">
-            <div>
-              <p class="data-upload-subtitle">Forecast</p>
-              <h2 class="data-upload-title">Загрузка фактических данных</h2>
-            </div>
-          </div>
-          <p class="data-upload-copy">
-            Загрузите JSON или CSV с историческими данными. После отправки записи попадут в БД и смогут использоваться модулем прогнозирования.
-          </p>
-          <button class="wide-button" @click="openUploadDataModal">
+        <div class="manager-actions">
+          <button v-if="currentUserRole === 'admin'" class="wide-button" @click="openUploadDataModal">
             Загрузить данные
           </button>
-        </section>
 
-        <div class="manager-actions">
+          <button v-if="currentUserRole === 'admin'" class="wide-button secondary" @click="openCreateVenueModal">
+            Создать заведение
+          </button>
+
           <button class="wide-button secondary" @click="openEmployeesModal">
             Просмотр сотрудников
           </button>
@@ -388,11 +381,7 @@
               </label>
             </div>
 
-            <div class="upload-format-note">
-              <strong>Поддерживаемые поля:</strong>
-              <p>`date`, `load` или `actual_load`, а также `venue` или `venue_id`.</p>
-              <p>Также поддерживаются колонки: `Учетный день`, `Количество гостей`, `заказов`.</p>
-            </div>
+          
 
             <div v-if="forecastUploadFileName" class="upload-preview-card">
               <p v-if="forecastUploadFileName"><strong>Файл:</strong> {{ forecastUploadFileName }}</p>
@@ -413,6 +402,92 @@
                 :disabled="isUploadingForecastData"
               >
                 {{ isUploadingForecastData ? 'Загружаем...' : 'Отправить в БД' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showCreateVenueModal" class="modal-overlay" @click.self="closeCreateVenueModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Admin</p>
+              <h2 class="modal-title">Создание заведения</h2>
+            </div>
+            <button class="modal-close" @click="closeCreateVenueModal">×</button>
+          </div>
+
+          <form class="role-form" @submit.prevent="submitCreateVenue">
+            <div v-if="createVenueError" class="form-alert error">
+              {{ createVenueError }}
+            </div>
+
+            <div v-if="createVenueSuccess" class="form-alert success">
+              {{ createVenueSuccess }}
+            </div>
+
+            <div class="form-grid">
+              <label class="form-field">
+                <span>Название *</span>
+                <input
+                  v-model.trim="createVenueForm.name"
+                  type="text"
+                  placeholder="Новый ресторан"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field">
+                <span>Таймзона *</span>
+                <input
+                  v-model.trim="createVenueForm.timezone"
+                  type="text"
+                  placeholder="Asia/Vladivostok"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full">
+                <span>Адрес *</span>
+                <input
+                  v-model.trim="createVenueForm.address"
+                  type="text"
+                  placeholder="г. Владивосток, ул. Пример, 1"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full checkbox-field">
+                <input
+                  v-model="createVenueForm.is_active"
+                  type="checkbox"
+                  :disabled="isCreatingVenue"
+                />
+                <span>Заведение активно</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button
+                type="button"
+                class="wide-button secondary"
+                :disabled="isCreatingVenue"
+                @click="closeCreateVenueModal"
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                class="wide-button"
+                :disabled="isCreatingVenue"
+              >
+                {{ isCreatingVenue ? createVenueLoadingLabel : createVenueSubmitLabel }}
               </button>
             </div>
           </form>
@@ -447,6 +522,13 @@ const getDefaultCreateRoleForm = () => ({
   role: 'employee_noob',
   venue: '',
   venue_name: ''
+})
+
+const getDefaultCreateVenueForm = () => ({
+  name: '',
+  address: '',
+  timezone: 'Asia/Vladivostok',
+  is_active: true
 })
 
 const asArray = (payload) => {
@@ -494,16 +576,22 @@ export default {
       menuOpen: false,
       showEmployeesModal: false,
       showCreateRoleModal: false,
+      showCreateVenueModal: false,
       showUploadDataModal: false,
       isLoadingEmployees: false,
       isCreatingRole: false,
+      isCreatingVenue: false,
       isUploadingForecastData: false,
       employeesError: '',
       createRoleError: '',
       createRoleSuccess: '',
+      createVenueError: '',
+      createVenueSuccess: '',
       uploadDataError: '',
       uploadDataSuccess: '',
       copyNotice: '',
+      createVenueSubmitLabel: '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0432\u0435\u0434\u0435\u043d\u0438\u0435',
+      createVenueLoadingLabel: '\u0421\u043e\u0437\u0434\u0430\u0435\u043c...',
       employees: [],
       venues: [],
       forecastUploadVenueId: '',
@@ -511,6 +599,7 @@ export default {
       forecastUploadFileName: '',
       forecastUploadPreview: [],
       createRoleForm: getDefaultCreateRoleForm(),
+      createVenueForm: getDefaultCreateVenueForm(),
       user: savedUser || {
         username: '',
         email: '',
@@ -740,6 +829,22 @@ export default {
       this.createRoleSuccess = ''
       this.copyNotice = ''
     },
+    openCreateVenueModal() {
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
+      this.showCreateVenueModal = true
+    },
+    closeCreateVenueModal() {
+      if (this.isCreatingVenue) {
+        return
+      }
+
+      this.showCreateVenueModal = false
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
+    },
     openUploadDataModal() {
       this.showUploadDataModal = true
       this.uploadDataError = ''
@@ -967,6 +1072,18 @@ export default {
 
       return payload
     },
+    buildCreateVenuePayload() {
+      const name = this.createVenueForm.name.trim()
+      const address = this.createVenueForm.address.trim()
+      const timezone = this.createVenueForm.timezone.trim()
+
+      return {
+        name,
+        address,
+        timezone,
+        is_active: this.createVenueForm.is_active
+      }
+    },
     extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
 
@@ -1065,7 +1182,44 @@ export default {
       } finally {
         this.isCreatingRole = false
       }
+    },
+    async submitCreateVenue() {
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+
+      if (!this.createVenueForm.name.trim()) {
+        this.createVenueError = 'Название заведения обязательно'
+        return
+      }
+
+      if (!this.createVenueForm.address.trim()) {
+        this.createVenueError = 'Адрес заведения обязателен'
+        return
+      }
+
+      if (!this.createVenueForm.timezone.trim()) {
+        this.createVenueError = 'Таймзона обязательна'
+        return
+      }
+
+      this.isCreatingVenue = true
+
+      try {
+        await api.post('/venues/', this.buildCreateVenuePayload())
+        this.createVenueSuccess = 'Заведение успешно создано'
+        this.createVenueForm = getDefaultCreateVenueForm()
+        await this.loadVenues()
+      } catch (error) {
+        this.createVenueError = this.extractErrorMessage(error, 'Не удалось создать заведение')
+      } finally {
+        this.isCreatingVenue = false
+      }
     }
   }
 }
 </script>
+
+
+
+
+
