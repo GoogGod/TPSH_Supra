@@ -55,19 +55,6 @@
         <div class="waiter-picker-card">
           <div class="waiter-picker-head">
             <h2>Места</h2>
-            <p class="waiter-picker-description-desktop">{{ selectorDescription }}</p>
-            <button
-              v-if="useMobileSelectorInfo"
-              class="waiter-picker-info-button"
-              type="button"
-              :aria-expanded="showMobileSelectorInfo ? 'true' : 'false'"
-              @click="showMobileSelectorInfo = !showMobileSelectorInfo"
-            >
-              i
-            </button>
-          </div>
-          <div v-if="useMobileSelectorInfo && showMobileSelectorInfo" class="waiter-picker-info-mobile">
-            {{ selectorDescription }}
           </div>
           <div v-if="waiters.length === 0" class="waiter-empty-state">Нет доступных мест для отображения</div>
           <div v-else class="waiter-button-list">
@@ -310,7 +297,6 @@ export default {
       selectedWaiter: '',
       selectedEmployeeToAssign: '',
       showAssignPanel: false,
-      showMobileSelectorInfo: false,
       isHandheldDevice: detectHandheldDevice(),
       weekdays: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
       scheduleRaw: [],
@@ -339,7 +325,6 @@ export default {
     currentUserRole() { return normalizeRole(this.user.role) },
     currentVenueId() { return getVenueId(this.user) },
     canManageSchedule() { return ['manager', 'admin'].includes(this.currentUserRole) },
-    useMobileSelectorInfo() { return this.isHandheldDevice },
     isWaiterView() { return !this.canManageSchedule },
     hasSchedule() { return this.scheduleExists },
     isDraftSchedule() { return this.currentScheduleStatus === 'draft' },
@@ -495,7 +480,6 @@ export default {
   methods: {
     updateDeviceMode() {
       this.isHandheldDevice = detectHandheldDevice()
-      if (!this.isHandheldDevice) this.showMobileSelectorInfo = false
     },
     async loadEmployees() {
       if (USE_MOCK_AUTH) return
