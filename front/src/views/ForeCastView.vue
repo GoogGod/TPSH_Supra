@@ -2,10 +2,14 @@
   <div class="forecast-page">
     <transition name="menu-overlay">
       <div v-if="menuOpen" class="side-menu-overlay" @click="closeMenu"></div>
+      <div v-if="menuOpen" class="side-menu-overlay" @click="closeMenu"></div>
     </transition>
+
 
     <transition name="side-menu">
       <aside v-if="menuOpen" class="side-menu">
+        <div class="side-menu-top">
+          <button class="side-menu-close" @click="closeMenu">&times;</button>
         <div class="side-menu-top">
           <button class="side-menu-close" @click="closeMenu">&times;</button>
         </div>
@@ -16,12 +20,17 @@
         <div class="side-menu-footer">
           <button class="side-menu-item side-menu-item-danger" @click="handleLogout">Выйти</button>
         </div>
+        <div class="side-menu-footer">
+          <button class="side-menu-item side-menu-item-danger" @click="handleLogout">Выйти</button>
+        </div>
       </aside>
     </transition>
+
 
     <main class="forecast-content">
       <section class="forecast-card">
         <div class="forecast-card-top">
+          <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
           <button class="menu-button" @click="openMenu" aria-label="Открыть меню">
             <span></span>
             <span></span>
@@ -34,6 +43,7 @@
           <NotificationBell @updated="handleNotificationsUpdated" />
         </div>
 
+
         <div class="month-toolbar">
           <div class="month-switcher">
             <button class="month-button" :disabled="isMonthSwitching" @click="prevMonth">‹</button>
@@ -43,7 +53,11 @@
           <button v-if="canManageSchedule" class="create-schedule-button" :disabled="isGeneratingSchedule" @click="handleCreateSchedule">
             {{ isGeneratingSchedule ? 'Создаем...' : 'Создать расписание' }}
           </button>
+          <button v-if="canManageSchedule" class="create-schedule-button" :disabled="isGeneratingSchedule" @click="handleCreateSchedule">
+            {{ isGeneratingSchedule ? 'Создаем...' : 'Создать расписание' }}
+          </button>
         </div>
+
 
         <div class="schedule-info-row">
           <div v-if="scheduleNotice" class="schedule-status-card is-success">{{ scheduleNotice }}</div>
@@ -80,6 +94,7 @@
 
         <div class="waiter-picker-card">
           <div class="waiter-picker-head">
+          <div class="waiter-picker-head">
             <h2>Места</h2>
             <p>{{ selectorDescription }}</p>
           </div>
@@ -94,10 +109,20 @@
               :disabled="!canSelectWaiter(waiter)"
               @click="selectWaiter(waiter.slot_position_key)"
             >
+            <button
+              v-for="waiter in waiters"
+              :key="waiter.slot_position_key"
+              class="waiter-button"
+              :class="{ active: waiter.slot_position_key === selectedWaiter, disabled: !canSelectWaiter(waiter) }"
+              :style="getWaiterButtonStyle(waiter)"
+              :disabled="!canSelectWaiter(waiter)"
+              @click="selectWaiter(waiter.slot_position_key)"
+            >
               <span class="waiter-button-name">{{ waiter.label }}</span>
               <span class="waiter-button-meta">{{ getWaiterMeta(waiter) }}</span>
             </button>
           </div>
+
 
           <div v-if="selectedWaiterInfo" class="slot-actions-card">
             <p class="slot-actions-title">{{ selectedWaiterInfo.label }}</p>
@@ -106,9 +131,15 @@
               <button class="claim-slot-button" :disabled="!canClaimSelectedWaiter || isClaimingSlot" @click="handleClaimSelectedWaiter">
                 {{ isClaimingSlot ? 'Закрепляем...' : 'Закрепиться' }}
               </button>
+              <button class="claim-slot-button" :disabled="!canClaimSelectedWaiter || isClaimingSlot" @click="handleClaimSelectedWaiter">
+                {{ isClaimingSlot ? 'Закрепляем...' : 'Закрепиться' }}
+              </button>
             </div>
             <div v-else class="slot-actions-buttons">
               <button class="claim-slot-button" :disabled="!canOpenAssignPanel || isAssigningSlot || isUnassigningSlot" @click="openAssignPanel">Закрепить</button>
+              <button class="unassign-slot-button" :disabled="!canUnassignSelectedWaiter || isUnassigningSlot || isAssigningSlot" @click="handleUnassignSelectedWaiter">
+                {{ isUnassigningSlot ? 'Открепляем...' : 'Открепить' }}
+              </button>
               <button class="unassign-slot-button" :disabled="!canUnassignSelectedWaiter || isUnassigningSlot || isAssigningSlot" @click="handleUnassignSelectedWaiter">
                 {{ isUnassigningSlot ? 'Открепляем...' : 'Открепить' }}
               </button>
@@ -192,8 +223,17 @@
         <div class="calendar-card">
           <div class="calendar-weekdays">
             <div v-for="weekday in weekdays" :key="weekday" class="weekday-cell">{{ weekday }}</div>
+          <div class="calendar-weekdays">
+            <div v-for="weekday in weekdays" :key="weekday" class="weekday-cell">{{ weekday }}</div>
           </div>
           <div class="calendar-grid">
+            <div
+              v-for="day in calendarDays"
+              :key="day.key"
+              class="calendar-cell"
+              :class="{ 'outside-month': !day.isCurrentMonth, 'is-working': !!day.shift, 'is-open-slot': !day.shift && day.hasOpenSlots, 'is-today': day.isToday, 'is-selected-waiter': !!day.shift }"
+              :style="getDayStyle(day)"
+            >
             <div
               v-for="day in calendarDays"
               :key="day.key"
@@ -219,6 +259,9 @@
 
         <div v-if="canPublishCurrentSchedule" class="bottom-actions bottom-actions-single">
           <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
+
+        <div v-if="canPublishCurrentSchedule" class="bottom-actions bottom-actions-single">
+          <button class="publish-schedule-button" :disabled="isPublishingSchedule" @click="handlePublishSchedule">{{ isPublishingSchedule ? 'Публикуем...' : 'Опубликовать' }}</button>
         </div>
       </section>
     </main>
@@ -232,14 +275,37 @@ import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
 import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, updateScheduleEntriesBulk } from '../services/schedule'
+import { assignScheduleSlot, claimScheduleSlot, fetchScheduleForMonth, generateSchedule, publishSchedule, unassignScheduleSlot, updateScheduleEntriesBulk } from '../services/schedule'
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
+const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
+const SHIFT_LABELS = { morning: 'Утро', evening: 'Вечер', full: 'Полный день', off: 'Выходной', shift: 'Смена' }
 const WAITER_COLORS = ['#b98597', '#7898c2', '#6f9b97', '#c08d78', '#9487bb', '#b7aa72', '#7ea88a', '#a98bb3']
 const SHIFT_LABELS = { morning: 'Утро', evening: 'Вечер', full: 'Полный день', off: 'Выходной', shift: 'Смена' }
 const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
 const asArray = (payload) => Array.isArray(payload) ? payload : Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.data) ? payload.data : []
 const getVenueId = (entity) => { const raw = entity?.venue_id ?? entity?.venue?.id ?? entity?.venue; return raw === undefined || raw === null || raw === '' ? null : Number(raw) }
+const formatTimeForApi = (value) => { const normalized = String(value || '').trim(); return normalized && normalized.length === 5 ? `${normalized}:00` : normalized }
+const getHoursDifference = (start, end) => {
+  if (!start || !end) return null
+  const [sh = '0', sm = '0'] = String(start).split(':')
+  const [eh = '0', em = '0'] = String(end).split(':')
+  const startTotal = Number(sh) * 60 + Number(sm)
+  let endTotal = Number(eh) * 60 + Number(em)
+  if (!Number.isFinite(startTotal) || !Number.isFinite(endTotal)) return null
+  if (endTotal < startTotal) endTotal += 24 * 60
+  return Number(((endTotal - startTotal) / 60).toFixed(2))
+}
+const buildComparableEntryState = (entry) => ({
+  entry_id: Number(entry?.entry_id ?? 0),
+  is_working: Boolean(entry?.is_working),
+  shift_type: String(entry?.shift_type || '').toLowerCase(),
+  waiters_needed: Number(entry?.waiters_needed ?? 0),
+  work_start: String(entry?.work_start || ''),
+  work_end: String(entry?.work_end || ''),
+  work_hours: entry?.work_hours === '' || entry?.work_hours === null || entry?.work_hours === undefined ? null : Number(entry.work_hours)
+})
 const formatTimeForApi = (value) => { const normalized = String(value || '').trim(); return normalized && normalized.length === 5 ? `${normalized}:00` : normalized }
 const getHoursDifference = (start, end) => {
   if (!start || !end) return null
@@ -302,6 +368,15 @@ export default {
     canPublishCurrentSchedule() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && this.isDraftSchedule },
     roleHint() { return this.canManageSchedule ? (this.isDraftSchedule ? 'Черновик открыт: выберите место, поправьте смены и затем опубликуйте расписание.' : 'Выберите место и управляйте закреплениями сотрудников.') : 'Выберите место и закрепитесь за ним. Официант может быть закреплен только за одним местом.' },
     selectorDescription() { return this.waiters.length === 0 ? 'Кнопки появятся, когда в расписании будут доступные места.' : this.canManageSchedule ? 'Менеджер и админ могут закреплять сотрудников, снимать их и редактировать черновик по выбранному месту.' : 'Доступны только места вашей категории. Закрепиться можно только за одним местом.' },
+    currentUserRole() { return normalizeRole(this.user.role) },
+    currentVenueId() { return getVenueId(this.user) },
+    canManageSchedule() { return ['manager', 'admin'].includes(this.currentUserRole) },
+    isWaiterView() { return !this.canManageSchedule },
+    hasSchedule() { return this.scheduleExists },
+    isDraftSchedule() { return this.currentScheduleStatus === 'draft' },
+    canPublishCurrentSchedule() { return this.canManageSchedule && this.hasSchedule && !!this.currentScheduleId && this.isDraftSchedule },
+    roleHint() { return this.canManageSchedule ? (this.isDraftSchedule ? 'Черновик открыт: выберите место, поправьте смены и затем опубликуйте расписание.' : 'Выберите место и управляйте закреплениями сотрудников.') : 'Выберите место и закрепитесь за ним. Официант может быть закреплен только за одним местом.' },
+    selectorDescription() { return this.waiters.length === 0 ? 'Кнопки появятся, когда в расписании будут доступные места.' : this.canManageSchedule ? 'Менеджер и админ могут закреплять сотрудников, снимать их и редактировать черновик по выбранному месту.' : 'Доступны только места вашей категории. Закрепиться можно только за одним местом.' },
     workingSchedule() { return this.scheduleRaw.filter((item) => item.is_working === true && item.employee_key) },
     waiters() {
       const grouped = new Map()
@@ -326,10 +401,59 @@ export default {
             identities: [normalizeIdentity(item.employee_key), normalizeIdentity(item.employee_id), normalizeIdentity(item.waiter_num), normalizeIdentity(item.assigned_employee_id), normalizeIdentity(item.assigned_employee_username)].filter(Boolean)
           })
         }
+        if (!grouped.has(slotPositionKey)) {
+          grouped.set(slotPositionKey, {
+            slot_position_key: slotPositionKey,
+            employee_key: item.employee_key,
+            employee_id: item.employee_id,
+            assigned_employee_id: item.assigned_employee_id,
+            assigned_employee_username: item.assigned_employee_username,
+            assigned_employee_name: item.assigned_employee_name,
+            slot_id: item.slot_id,
+            waiter_num: item.waiter_num,
+            label: item.employee_label || this.getFallbackEmployeeLabel(item),
+            grade: item.grade || null,
+            roleDisplay: item.employee_role_display || '',
+            color: this.getWaiterColor(slotPositionKey),
+            isClaimed: Boolean(item.assigned_employee_id || item.assigned_employee_name),
+            claimedByCurrentUser: this.isCurrentUserAssignment(item),
+            identities: [normalizeIdentity(item.employee_key), normalizeIdentity(item.employee_id), normalizeIdentity(item.waiter_num), normalizeIdentity(item.assigned_employee_id), normalizeIdentity(item.assigned_employee_username)].filter(Boolean)
+          })
+        }
       })
+      return Array.from(grouped.values()).sort((left, right) => (left.waiter_num ?? 0) - (right.waiter_num ?? 0))
       return Array.from(grouped.values()).sort((left, right) => (left.waiter_num ?? 0) - (right.waiter_num ?? 0))
     },
     selectedWaiterInfo() { return this.waiters.find((item) => item.slot_position_key === this.selectedWaiter) || null },
+    pinnedWaiterKey() {
+      const ids = [normalizeIdentity(this.user.id), normalizeIdentity(this.user.username), normalizeIdentity(this.user.email), normalizeIdentity(this.user.waiter_num)].filter(Boolean)
+      const matched = this.waiters.find((waiter) => waiter.identities.some((identity) => ids.includes(identity)))
+      return matched?.slot_position_key || ''
+    },
+    currentWaiterGrade() { if (this.currentUserRole === 'employee_noob' || this.currentUserRole === 'employee_pro') return this.currentUserRole; return String(this.waiters.find((waiter) => waiter.slot_position_key === this.pinnedWaiterKey)?.grade || '').toLowerCase() },
+    currentUserAssignedWaiterKey() { return this.waiters.find((waiter) => waiter.claimedByCurrentUser)?.slot_position_key || '' },
+    selectedWaiterEntries() { return this.scheduleRaw.filter((item) => (item.slot_position_key || item.employee_key) === this.selectedWaiter).sort((left, right) => String(left.date).localeCompare(String(right.date))) },
+    selectedWaiterScheduleMap() { return this.selectedWaiterEntries.reduce((accumulator, item) => { if (item.is_working) accumulator[item.date] = item; return accumulator }, {}) },
+    openSlotsMap() { return this.scheduleRaw.reduce((accumulator, item) => { if (item.date && item.is_working === true && !item.employee_key) accumulator[item.date] = true; return accumulator }, {}) },
+    selectedWaiterCaption() {
+      if (!this.selectedWaiterInfo) return ''
+      if (this.isWaiterView) {
+        if (this.currentScheduleStatus !== 'published') return 'Это черновик расписания. Закрепление станет доступно после публикации.'
+        if (this.currentUserAssignedWaiterKey && this.currentUserAssignedWaiterKey !== this.selectedWaiterInfo.slot_position_key) return 'Вы уже закреплены за другим местом.'
+        if (this.selectedWaiterInfo.isClaimed && !this.selectedWaiterInfo.claimedByCurrentUser) return 'Это место уже занято другим сотрудником.'
+        if (this.selectedWaiterInfo.claimedByCurrentUser) return 'Это ваше текущее закрепленное место.'
+        return 'Нажмите «Закрепиться», чтобы отправить заявку на это место.'
+      }
+      if (this.currentScheduleStatus !== 'published') {
+        return this.selectedWaiterInfo.isClaimed
+          ? 'Это черновик. Закрепления появятся после публикации, а сейчас можно только редактировать смены ниже.'
+          : 'Это черновик. Закрепление сотрудников станет доступно после публикации, а пока можно редактировать смены по дням.'
+      }
+      return this.selectedWaiterInfo.isClaimed ? 'Место занято. Можно снять сотрудника или отредактировать черновик смен ниже.' : 'Вы можете закрепить сотрудника, а ниже при необходимости отредактировать смены по дням.'
+    },
+    canClaimSelectedWaiter() { return !!(this.currentScheduleStatus === 'published' && this.isWaiterView && this.selectedWaiterInfo && this.canSelectWaiter(this.selectedWaiterInfo) && this.selectedWaiterInfo.slot_id && (!this.currentUserAssignedWaiterKey || this.currentUserAssignedWaiterKey === this.selectedWaiterInfo.slot_position_key) && (!this.selectedWaiterInfo.isClaimed || this.selectedWaiterInfo.claimedByCurrentUser)) },
+    canOpenAssignPanel() { return Boolean(this.currentScheduleStatus === 'published' && this.canManageSchedule && this.selectedWaiterInfo && this.selectedWaiterInfo.slot_id && !this.selectedWaiterInfo.isClaimed) },
+    canUnassignSelectedWaiter() { return Boolean(this.currentScheduleStatus === 'published' && this.canManageSchedule && this.selectedWaiterInfo?.slot_id && this.selectedWaiterInfo.isClaimed) },
     pinnedWaiterKey() {
       const ids = [normalizeIdentity(this.user.id), normalizeIdentity(this.user.username), normalizeIdentity(this.user.email), normalizeIdentity(this.user.waiter_num)].filter(Boolean)
       const matched = this.waiters.find((waiter) => waiter.identities.some((identity) => ids.includes(identity)))
@@ -542,15 +666,103 @@ export default {
       const updates = this.getChangedEntryUpdates()
       if (!updates.length) { this.scheduleNotice = 'Нет изменений для сохранения.'; this.scheduleError = ''; return }
       this.isSavingDraft = true
+    async loadEmployees() {
+      if (USE_MOCK_AUTH) return
+      try { const response = await api.get('/users/'); this.employees = asArray(response.data) } catch (error) { this.employees = [] }
+    },
+    async handleLogout() { this.menuOpen = false; await logoutUser(); this.$router.replace('/login') },
+    openMenu() { this.menuOpen = true },
+    closeMenu() { this.menuOpen = false },
+    goToProfile() { this.menuOpen = false; this.$router.push('/cabinet') },
+    clearScheduleNotice() { this.scheduleNotice = '' },
+    openAssignPanel() { if (!this.canOpenAssignPanel) return; this.selectedEmployeeToAssign = ''; this.showAssignPanel = true },
+    closeAssignPanel() { this.selectedEmployeeToAssign = ''; this.showAssignPanel = false },
+    async prevMonth() { this.clearScheduleNotice(); this.currentMonth = new Date(this.currentMonth.getFullYear(), this.currentMonth.getMonth() - 1, 1); await this.loadSchedule({ isMonthSwitching: true }) },
+    async nextMonth() { this.clearScheduleNotice(); this.currentMonth = new Date(this.currentMonth.getFullYear(), this.currentMonth.getMonth() + 1, 1); await this.loadSchedule({ isMonthSwitching: true }) },
+    async loadSchedule({ isMonthSwitching = false, scheduleId = null } = {}) {
+      this.scheduleError = ''
+      this.isLoadingSchedule = !isMonthSwitching
+      this.isMonthSwitching = isMonthSwitching
+      this.closeAssignPanel()
+      try {
+        const schedule = await fetchScheduleForMonth({ monthDate: this.currentMonth, user: this.user, scheduleId })
+        this.scheduleRaw = Array.isArray(schedule.entries) ? schedule.entries : []
+        this.scheduleExists = Boolean(schedule.scheduleExists)
+        this.currentScheduleId = schedule.scheduleId || null
+        this.currentScheduleStatus = schedule.scheduleStatus || null
+        this.syncSelectedWaiter()
+        this.syncEditableEntries()
+      } catch (error) {
+        this.scheduleRaw = []
+        this.scheduleExists = false
+        this.currentScheduleId = null
+        this.currentScheduleStatus = null
+        this.selectedWaiter = ''
+        this.editableEntries = []
+        this.scheduleError = error.message || 'Не удалось загрузить расписание'
+      } finally {
+        this.isLoadingSchedule = false
+        this.isMonthSwitching = false
+      }
+    },
+    syncSelectedWaiter() {
+      if (this.waiters.length === 0) { this.selectedWaiter = ''; return }
+      if (this.waiters.some((item) => item.slot_position_key === this.selectedWaiter)) return
+      if (this.isWaiterView && this.currentUserAssignedWaiterKey) { this.selectedWaiter = this.currentUserAssignedWaiterKey; return }
+      if (this.isWaiterView && this.pinnedWaiterKey) {
+        const pinned = this.waiters.find((item) => item.slot_position_key === this.pinnedWaiterKey)
+        if (pinned && this.canSelectWaiter(pinned)) { this.selectedWaiter = this.pinnedWaiterKey; return }
+      }
+      this.selectedWaiter = this.waiters.find((item) => this.canSelectWaiter(item))?.slot_position_key || ''
+    },
+    syncEditableEntries() { this.editableEntries = this.selectedWaiterEntries.map((entry) => this.createEditableEntry(entry)) },
+    createEditableEntry(entry) { return { entry_id: entry.entry_id, date: entry.date, is_working: Boolean(entry.is_working), shift_type: entry.shift_type || 'shift', waiters_needed: Number(entry.waiters_needed ?? 1), work_start: entry.work_start || '', work_end: entry.work_end || '', work_hours: entry.work_hours ?? getHoursDifference(entry.work_start, entry.work_end) ?? 0 } },
+    resetEditableEntries() { this.syncEditableEntries(); this.scheduleNotice = 'Изменения в форме сброшены.'; this.scheduleError = '' },
+    handleEditableWorkingToggle(entry) {
+      if (!entry.is_working) { entry.shift_type = 'off'; entry.waiters_needed = 0; entry.work_hours = 0; return }
+      if (entry.shift_type === 'off') entry.shift_type = 'shift'
+      if (!entry.waiters_needed) entry.waiters_needed = 1
+      this.updateEditableWorkHours(entry)
+    },
+    handleEditableTimeChange(index) { const entry = this.editableEntries[index]; if (entry) this.updateEditableWorkHours(entry) },
+    updateEditableWorkHours(entry) { const hours = getHoursDifference(entry.work_start, entry.work_end); if (hours !== null) entry.work_hours = hours },
+    buildEntryUpdatePayload(entry) {
+      return {
+        id: Number(entry.entry_id),
+        is_working: Boolean(entry.is_working),
+        shift_type: entry.is_working ? String(entry.shift_type || 'shift').toLowerCase() : 'off',
+        waiters_needed: entry.is_working ? Number(entry.waiters_needed ?? 0) : 0,
+        work_start: entry.is_working ? formatTimeForApi(entry.work_start) : '',
+        work_end: entry.is_working ? formatTimeForApi(entry.work_end) : '',
+        work_hours: entry.is_working ? Number(entry.work_hours ?? getHoursDifference(entry.work_start, entry.work_end) ?? 0) : 0
+      }
+    },
+    getChangedEntryUpdates() {
+      return this.editableEntries.map((entry, index) => {
+        const original = this.selectedWaiterEntries[index]
+        if (JSON.stringify(buildComparableEntryState(entry)) === JSON.stringify(buildComparableEntryState(original))) return null
+        return this.buildEntryUpdatePayload(entry)
+      }).filter(Boolean)
+    },
+    async saveDraftEdits() {
+      if (!this.canEditSelectedWaiterSchedule || this.isSavingDraft) return
+      const updates = this.getChangedEntryUpdates()
+      if (!updates.length) { this.scheduleNotice = 'Нет изменений для сохранения.'; this.scheduleError = ''; return }
+      this.isSavingDraft = true
       this.scheduleError = ''
       this.scheduleNotice = ''
       try {
         const response = await updateScheduleEntriesBulk({ scheduleId: this.currentScheduleId, updates })
         await this.loadSchedule({ scheduleId: this.currentScheduleId })
         this.scheduleNotice = `Черновик обновлен. Изменено записей: ${Number(response?.updated_entries_count) || updates.length}.`
+        const response = await updateScheduleEntriesBulk({ scheduleId: this.currentScheduleId, updates })
+        await this.loadSchedule({ scheduleId: this.currentScheduleId })
+        this.scheduleNotice = `Черновик обновлен. Изменено записей: ${Number(response?.updated_entries_count) || updates.length}.`
       } catch (error) {
         this.scheduleError = error.message || 'Не удалось обновить черновик расписания'
+        this.scheduleError = error.message || 'Не удалось обновить черновик расписания'
       } finally {
+        this.isSavingDraft = false
         this.isSavingDraft = false
       }
     },

@@ -63,7 +63,13 @@
 
         <div class="manager-actions">
           <button v-if="currentUserRole === 'admin'" class="wide-button" @click="openUploadDataModal">
+        <div class="manager-actions">
+          <button v-if="currentUserRole === 'admin'" class="wide-button" @click="openUploadDataModal">
             Загрузить данные
+          </button>
+
+          <button v-if="currentUserRole === 'admin'" class="wide-button secondary" @click="openCreateVenueModal">
+            Создать заведение
           </button>
 
           <button v-if="currentUserRole === 'admin'" class="wide-button secondary" @click="openCreateVenueModal">
@@ -458,6 +464,7 @@
             </div>
 
           
+          
 
             <div v-if="forecastUploadFileName" class="upload-preview-card">
               <p v-if="forecastUploadFileName"><strong>Файл:</strong> {{ forecastUploadFileName }}</p>
@@ -478,6 +485,92 @@
                 :disabled="isUploadingForecastData"
               >
                 {{ isUploadingForecastData ? 'Загружаем...' : 'Отправить в БД' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="modal-fade">
+      <div v-if="showCreateVenueModal" class="modal-overlay" @click.self="closeCreateVenueModal">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div>
+              <p class="modal-subtitle">Admin</p>
+              <h2 class="modal-title">Создание заведения</h2>
+            </div>
+            <button class="modal-close" @click="closeCreateVenueModal">×</button>
+          </div>
+
+          <form class="role-form" @submit.prevent="submitCreateVenue">
+            <div v-if="createVenueError" class="form-alert error">
+              {{ createVenueError }}
+            </div>
+
+            <div v-if="createVenueSuccess" class="form-alert success">
+              {{ createVenueSuccess }}
+            </div>
+
+            <div class="form-grid">
+              <label class="form-field">
+                <span>Название *</span>
+                <input
+                  v-model.trim="createVenueForm.name"
+                  type="text"
+                  placeholder="Новый ресторан"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field">
+                <span>Таймзона *</span>
+                <input
+                  v-model.trim="createVenueForm.timezone"
+                  type="text"
+                  placeholder="Asia/Vladivostok"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full">
+                <span>Адрес *</span>
+                <input
+                  v-model.trim="createVenueForm.address"
+                  type="text"
+                  placeholder="г. Владивосток, ул. Пример, 1"
+                  required
+                  :disabled="isCreatingVenue"
+                />
+              </label>
+
+              <label class="form-field form-field-full checkbox-field">
+                <input
+                  v-model="createVenueForm.is_active"
+                  type="checkbox"
+                  :disabled="isCreatingVenue"
+                />
+                <span>Заведение активно</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button
+                type="button"
+                class="wide-button secondary"
+                :disabled="isCreatingVenue"
+                @click="closeCreateVenueModal"
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                class="wide-button"
+                :disabled="isCreatingVenue"
+              >
+                {{ isCreatingVenue ? createVenueLoadingLabel : createVenueSubmitLabel }}
               </button>
             </div>
           </form>
@@ -667,10 +760,12 @@ export default {
       showManageEmployeeModal: false,
       showCreateRoleModal: false,
       showCreateVenueModal: false,
+      showCreateVenueModal: false,
       showUploadDataModal: false,
       isLoadingEmployees: false,
       isLoadingManagedEmployee: false,
       isCreatingRole: false,
+      isCreatingVenue: false,
       isCreatingVenue: false,
       isUploadingForecastData: false,
       isSavingManagedEmployee: false,
@@ -681,9 +776,13 @@ export default {
       createRoleSuccess: '',
       createVenueError: '',
       createVenueSuccess: '',
+      createVenueError: '',
+      createVenueSuccess: '',
       uploadDataError: '',
       uploadDataSuccess: '',
       copyNotice: '',
+      createVenueSubmitLabel: '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0432\u0435\u0434\u0435\u043d\u0438\u0435',
+      createVenueLoadingLabel: '\u0421\u043e\u0437\u0434\u0430\u0435\u043c...',
       createVenueSubmitLabel: '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0432\u0435\u0434\u0435\u043d\u0438\u0435',
       createVenueLoadingLabel: '\u0421\u043e\u0437\u0434\u0430\u0435\u043c...',
       employees: [],
@@ -1015,6 +1114,22 @@ export default {
       this.createVenueSuccess = ''
       this.createVenueForm = getDefaultCreateVenueForm()
     },
+    openCreateVenueModal() {
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
+      this.showCreateVenueModal = true
+    },
+    closeCreateVenueModal() {
+      if (this.isCreatingVenue) {
+        return
+      }
+
+      this.showCreateVenueModal = false
+      this.createVenueError = ''
+      this.createVenueSuccess = ''
+      this.createVenueForm = getDefaultCreateVenueForm()
+    },
     openUploadDataModal() {
       this.showUploadDataModal = true
       this.uploadDataError = ''
@@ -1275,12 +1390,36 @@ export default {
     extractErrorMessage(error, fallbackMessage = 'Не удалось выполнить запрос') {
       const data = error?.response?.data
       const status = Number(error?.response?.status)
+      const status = Number(error?.response?.status)
 
       if (!data) {
         return error?.message || fallbackMessage
       }
 
       if (typeof data === 'string') {
+        const normalized = data.trim()
+
+        if (/^<!doctype html/i.test(normalized) || /^<html/i.test(normalized)) {
+          const titleMatch = normalized.match(/<title>(.*?)<\/title>/i)
+          const title = titleMatch?.[1]?.trim()
+
+          if (status === 404) {
+            return title
+              ? `Сервер не нашел нужный маршрут: ${title}.`
+              : 'Сервер не нашел нужный маршрут.'
+          }
+
+          if (status === 405) {
+            return title
+              ? `Сервер отклонил метод запроса: ${title}.`
+              : 'Сервер отклонил метод запроса.'
+          }
+
+          return title
+            ? `${fallbackMessage}. ${title}.`
+            : fallbackMessage
+        }
+
         const normalized = data.trim()
 
         if (/^<!doctype html/i.test(normalized) || /^<html/i.test(normalized)) {
@@ -1460,6 +1599,11 @@ export default {
   }
 }
 </script>
+
+
+
+
+
 
 
 
