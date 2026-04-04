@@ -1,14 +1,14 @@
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken
-from drf_spectacular.utils import extend_schema
-
-from .serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
-from .permissions import IsManager
-from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
 from django.db import models
+from drf_spectacular.utils import extend_schema
+from rest_framework import status
+from rest_framework.generics import ListAPIView, RetrieveUpdateAPIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from .permissions import IsManager
+from .serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
 
 
 class RegisterView(APIView):
@@ -16,7 +16,8 @@ class RegisterView(APIView):
     Регистрация нового сотрудника.
     Доступно только менеджерам и администраторам.
     """
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [IsAuthenticated, IsManager]
 
     @extend_schema(
         request=RegisterSerializer,
@@ -25,11 +26,10 @@ class RegisterView(APIView):
         tags=["auth"],
     )
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
+        serializer = RegisterSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        # Возвращаем через read-сериализатор (с venue_name)
         response_serializer = UserSerializer(user)
         return Response(
             response_serializer.data,
@@ -42,6 +42,7 @@ class LogoutView(APIView):
     Выход из системы.
     Добавляет refresh-токен в чёрный список.
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
@@ -79,8 +80,9 @@ class LogoutView(APIView):
 class MeView(APIView):
     """
     Профиль текущего пользователя.
-    GET — получить, PATCH — обновить (phone, first_name, last_name).
+    GET — получить профиль.
     """
+
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
@@ -91,14 +93,17 @@ class MeView(APIView):
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
-    
+
+
 class UserListView(ListAPIView):
     """Список сотрудников объекта. Manager видит свой venue, Admin — всех."""
+
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         from .models import User
+
         user = self.request.user
         qs = User.objects.select_related("venue").filter(is_active=True)
 
@@ -118,9 +123,9 @@ class UserListView(ListAPIView):
             qs = qs.filter(venue_id=venue)
         if search:
             qs = qs.filter(
-                models.Q(first_name__icontains=search) |
-                models.Q(last_name__icontains=search) |
-                models.Q(username__icontains=search)
+                models.Q(first_name__icontains=search)
+                | models.Q(last_name__icontains=search)
+                | models.Q(username__icontains=search)
             )
 
         return qs
@@ -128,11 +133,13 @@ class UserListView(ListAPIView):
 
 class UserDetailView(RetrieveUpdateAPIView):
     """Детали / редактирование сотрудника. Admin может менять роль."""
+
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated, IsManager]
 
     def get_queryset(self):
         from .models import User
+
         user = self.request.user
         qs = User.objects.select_related("venue")
 

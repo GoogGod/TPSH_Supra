@@ -256,6 +256,44 @@ class ForecastingApiTests(APITestCase):
         self.assertEqual(response.data["slots_count"], 5)
         self.assertEqual(response.data["entries_count"], 150)
 
+    def test_manager_cannot_run_forecast_for_other_venue(self):
+        response = self.client.post(
+            reverse("forecast-run"),
+            {"venue": self.other_venue.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_manager_cannot_read_other_venue_hourly_forecast(self):
+        run = ForecastRun.objects.create(
+            venue=self.other_venue,
+            status=ForecastRun.Status.COMPLETED,
+            make_forecast=True,
+        )
+        HourlyForecast.objects.create(
+            run=run,
+            venue=self.other_venue,
+            forecast_datetime=timezone.make_aware(datetime(2026, 4, 2, 10, 0)),
+            date=date(2026, 4, 2),
+            hour=10,
+            day_of_week=3,
+            is_peak_hour=False,
+            is_weekend=False,
+            is_holiday=False,
+            orders_predicted=10,
+            orders_with_buffer=11,
+            guests_predicted=20,
+            guests_with_buffer=22,
+        )
+
+        response = self.client.get(
+            reverse("forecast-hourly"),
+            {"venue": self.other_venue.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     @staticmethod
     def _fake_xlsx():
         from django.core.files.uploadedfile import SimpleUploadedFile

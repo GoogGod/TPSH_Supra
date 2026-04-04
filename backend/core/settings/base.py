@@ -6,9 +6,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend_dist"
 FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 
+INSECURE_DEFAULT_SECRET_KEY = "django-insecure-CHANGE_ME-REPLACE-WITH-STRONG-SECRET-KEY-1234567890"
 SECRET_KEY = os.getenv(
     'SECRET_KEY',
-    "django-insecure-CHANGE_ME"
+    INSECURE_DEFAULT_SECRET_KEY
     )
 
 INSTALLED_APPS = [
@@ -123,6 +124,15 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": os.getenv("DRF_ANON_THROTTLE_RATE", "60/minute"),
+        "user": os.getenv("DRF_USER_THROTTLE_RATE", "240/minute"),
+        "login": os.getenv("DRF_LOGIN_THROTTLE_RATE", "10/minute"),
+    },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,

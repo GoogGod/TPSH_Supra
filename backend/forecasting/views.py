@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db.models import Sum, Max, Min, Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -23,6 +24,19 @@ from .serializers import (
 from .services.forecast_loader import load_forecast_to_db, ForecastLoadError
 from .services.ml_runner import MLRunner
 from .services.schedule_generator import generate_schedule_full, ScheduleGenerationError
+
+
+def _deny_cross_venue_access(user, venue_id):
+    if user.is_admin_role:
+        return None
+
+    if not user.venue_id or user.venue_id != venue_id:
+        return Response(
+            {"detail": "Доступ к этому объекту запрещен."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    return None
 
 
 class RunForecastView(APIView):
@@ -81,6 +95,10 @@ class RunForecastView(APIView):
             venue = Venue.objects.get(id=data["venue"], is_active=True)
         except Venue.DoesNotExist:
             return Response({"detail": "Объект не найден."}, status=404)
+
+        denied = _deny_cross_venue_access(user, venue.id)
+        if denied:
+            return denied
 
         run = ForecastRun.objects.create(
             venue=venue,
@@ -155,11 +173,26 @@ class HourlyForecastView(ListAPIView):
 
     def get_queryset(self):
         qs = HourlyForecast.objects.all()
+        user = self.request.user
 
-        venue = self.request.query_params.get("venue")
+        venue_param = self.request.query_params.get("venue")
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
         run_id = self.request.query_params.get("run_id")
+
+        venue = None
+        if venue_param:
+            try:
+                venue = int(venue_param)
+            except (TypeError, ValueError):
+                return HourlyForecast.objects.none()
+
+        if user.is_manager and not user.is_admin_role:
+            if not user.venue_id:
+                return HourlyForecast.objects.none()
+            if venue is not None and venue != user.venue_id:
+                raise PermissionDenied("Доступ к этому объекту запрещен.")
+            venue = user.venue_id
 
         if venue:
             qs = qs.filter(venue_id=venue)
@@ -190,15 +223,27 @@ class DailyForecastView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
 
     def get(self, request):
-        venue = request.query_params.get("venue")
+        venue_param = request.query_params.get("venue")
         date_from = request.query_params.get("date_from")
         date_to = request.query_params.get("date_to")
+        user = request.user
 
-        if not venue:
+        if venue_param:
+            try:
+                venue_id = int(venue_param)
+            except (TypeError, ValueError):
+                return Response({"detail": "Некорректный venue."}, status=status.HTTP_400_BAD_REQUEST)
+        elif user.venue_id:
+            venue_id = user.venue_id
+        else:
             return Response({"detail": "Укажите venue."}, status=status.HTTP_400_BAD_REQUEST)
 
+        denied = _deny_cross_venue_access(user, venue_id)
+        if denied:
+            return denied
+
         last_run = (
-            ForecastRun.objects.filter(venue_id=venue, status="completed")
+            ForecastRun.objects.filter(venue_id=venue_id, status="completed")
             .order_by("-created_at")
             .first()
         )
@@ -209,7 +254,7 @@ class DailyForecastView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        qs = HourlyForecast.objects.filter(run=last_run, venue_id=venue)
+        qs = HourlyForecast.objects.filter(run=last_run, venue_id=venue_id)
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:

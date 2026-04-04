@@ -515,3 +515,83 @@ class ShiftsApiTests(APITestCase):
             reverse("schedule-slots-delete", args=[schedule.id, slot.id]),
         )
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+
+    def test_manager_cannot_publish_schedule_of_other_venue(self):
+        other_venue = Venue.objects.create(
+            name="Ресторан Парк",
+            address="ул. Парковая, 7",
+            timezone="Europe/Moscow",
+        )
+        other_manager = User.objects.create_user(
+            username="manager_other_venue",
+            email="manager_other_venue@example.com",
+            password=self.password,
+            first_name="Другой",
+            last_name="Менеджер",
+            role=User.Role.MANAGER,
+            venue=other_venue,
+        )
+        foreign_schedule = MonthlySchedule.objects.create(
+            venue=other_venue,
+            year=2026,
+            month=11,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(reverse("schedule-publish", args=[foreign_schedule.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        # sanity: owner manager can publish
+        self.client.force_authenticate(user=other_manager)
+        own_response = self.client.post(reverse("schedule-publish", args=[foreign_schedule.id]))
+        self.assertEqual(own_response.status_code, status.HTTP_200_OK)
+
+    def test_manager_cannot_unassign_slot_of_other_venue(self):
+        other_venue = Venue.objects.create(
+            name="Ресторан Восток",
+            address="ул. Морская, 3",
+            timezone="Europe/Moscow",
+        )
+        other_employee = User.objects.create_user(
+            username="employee_other_venue",
+            email="employee_other_venue@example.com",
+            password=self.password,
+            first_name="Чужой",
+            last_name="Сотрудник",
+            role=User.Role.EMPLOYEE_PRO,
+            venue=other_venue,
+        )
+        foreign_schedule = MonthlySchedule.objects.create(
+            venue=other_venue,
+            year=2026,
+            month=12,
+            status=MonthlySchedule.Status.PUBLISHED,
+        )
+        foreign_slot = WaiterSlot.objects.create(
+            schedule=foreign_schedule,
+            waiter_num=1,
+            assigned_employee=other_employee,
+            assignment_status=WaiterSlot.AssignmentStatus.CONFIRMED,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(reverse("slot-unassign", args=[foreign_slot.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_manager_cannot_read_schedule_status_of_other_venue(self):
+        other_venue = Venue.objects.create(
+            name="Ресторан Север",
+            address="ул. Набережная, 10",
+            timezone="Europe/Moscow",
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.get(
+            reverse("schedule-status"),
+            {"venue": other_venue.id, "year": 2026, "month": 4},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
