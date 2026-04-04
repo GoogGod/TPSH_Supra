@@ -15,7 +15,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { isAuthenticated, getUserRole } from './services/auth'
+import { isAuthenticated, getUserRole, getCurrentUser } from './services/auth'
 
 const router = useRouter()
 const loggedIn = ref(isAuthenticated())
@@ -27,7 +27,11 @@ const syncAuthState = () => {
 }
 
 const showAdminShortcut = computed(() => {
-  return loggedIn.value && role.value === 'admin'
+  const user = getCurrentUser() || {}
+  const normalizedRole = String(role.value || user.role || user.ROLE || '').toLowerCase()
+  const isAdminByRole = normalizedRole === 'admin' || normalizedRole === 'administrator'
+  const isAdminByFlags = Boolean(user.is_superuser || user.is_staff)
+  return loggedIn.value && (isAdminByRole || isAdminByFlags)
 })
 
 let removeAfterEachHook
