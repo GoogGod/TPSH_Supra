@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 
 from django.urls import reverse
 from rest_framework import status
@@ -214,6 +214,49 @@ class ShiftsApiTests(APITestCase):
         self.assertTrue(entry.is_working)
         self.assertEqual(entry.shift_type, ScheduleEntry.ShiftType.FULL)
         self.assertEqual(entry.waiters_needed, 3)
+
+    def test_manager_can_bulk_update_draft_schedule_entries_with_custom_shift_type(self):
+        schedule = MonthlySchedule.objects.create(
+            venue=self.venue,
+            year=2026,
+            month=4,
+            status=MonthlySchedule.Status.DRAFT,
+        )
+        slot = WaiterSlot.objects.create(schedule=schedule, waiter_num=1)
+        entry = ScheduleEntry.objects.create(
+            slot=slot,
+            date=date(2026, 4, 3),
+            is_working=True,
+            shift_type=ScheduleEntry.ShiftType.FULL,
+            waiters_needed=1,
+            work_start=time(10, 0),
+            work_end=time(22, 0),
+            work_hours=12,
+        )
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.patch(
+            reverse("schedule-entries-bulk-update", args=[schedule.id]),
+            {
+                "updates": [
+                    {
+                        "id": entry.id,
+                        "is_working": True,
+                        "shift_type": ScheduleEntry.ShiftType.CUSTOM,
+                        "waiters_needed": 2,
+                        "work_start": "11:00:00",
+                        "work_end": "19:00:00",
+                        "work_hours": "8.0",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        entry.refresh_from_db()
+        self.assertEqual(entry.shift_type, ScheduleEntry.ShiftType.CUSTOM)
+        self.assertEqual(entry.waiters_needed, 2)
 
     def test_staff_shortage_metrics_are_calculated(self):
         schedule = MonthlySchedule.objects.create(

@@ -259,7 +259,6 @@ export default {
         const notifications = this.applyHiddenNotifications(await fetchNotifications())
         this.notifications = this.isOpen ? notifications : this.notifications
         this.unreadCount = notifications.filter((item) => !item.read).length
-        this.markSystemNotificationsAsSeen(notifications)
       } catch (error) {
         await this.refreshUnreadCount()
       }
@@ -267,6 +266,8 @@ export default {
     async syncNotifications({ silent = false, showSystem = true } = {}) {
       if (!silent) this.isLoading = true
       this.error = ''
+      this.pushEnabled = isPushNotificationsEnabled()
+      this.systemNotificationPermission = getSystemNotificationPermission()
 
       try {
         const notifications = this.applyHiddenNotifications(await fetchNotifications())
@@ -277,17 +278,21 @@ export default {
           const hiddenIds = new Set(this.hiddenNotificationIds)
           const shownIds = new Set(this.shownSystemNotificationIds)
           const freshNotifications = notifications.filter((item) => !item.read && item.id && !hiddenIds.has(item.id) && !shownIds.has(item.id))
+          const deliveredNotifications = []
 
           for (const notification of freshNotifications) {
             try {
               await showSystemNotification(notification)
+              deliveredNotifications.push(notification)
             } catch (error) {
               // ignore notification delivery issues
             }
           }
-        }
 
-        this.markSystemNotificationsAsSeen(notifications)
+          if (deliveredNotifications.length > 0) {
+            this.markSystemNotificationsAsSeen(deliveredNotifications)
+          }
+        }
       } catch (error) {
         this.error = error?.message || this.t.loadError
       } finally {
