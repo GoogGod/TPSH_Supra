@@ -120,3 +120,29 @@ export const uploadHistoricalForecastFile = async (file, { venueId = null } = {}
     normalizeErrorMessage(lastError, 'Не удалось загрузить файл с историческими данными')
   )
 }
+
+export const runForecastPipeline = async ({
+  venue,
+  processData = true,
+  trainModel = true,
+  makeForecast = false,
+  evaluate = true
+} = {}) => {
+  if (venue === null || venue === undefined || venue === '') {
+    throw new Error('Не выбрано заведение для запуска обучения')
+  }
+
+  try {
+    const response = await api.post('/forecast/run/', {
+      venue: Number(venue),
+      process_data: Boolean(processData),
+      train_model: Boolean(trainModel),
+      make_forecast: Boolean(makeForecast),
+      evaluate: Boolean(evaluate)
+    })
+
+    return response.data
+  } catch (error) {
+    throw new Error(normalizeErrorMessage(error, 'Не удалось запустить обучение модели'))
+  }
+}

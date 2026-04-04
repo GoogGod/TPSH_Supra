@@ -3,6 +3,7 @@
 const DEFAULT_TITLE = '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435'
 const ERROR_ID = '\u041d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0442\u043e\u0440 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f'
 const PUSH_ICON_URL = `${import.meta.env.BASE_URL}S_height.png`
+const PUSH_ENABLED_STORAGE_KEY = 'push_notifications_enabled'
 
 const asArray = (payload) => {
   if (Array.isArray(payload)) return payload
@@ -173,6 +174,22 @@ export const getSystemNotificationPermission = () => {
 export const requestSystemNotificationPermission = async () => {
   if (!supportsSystemNotifications()) return 'unsupported'
   return window.Notification.requestPermission()
+}
+
+export const isPushNotificationsEnabled = () => {
+  try {
+    return localStorage.getItem(PUSH_ENABLED_STORAGE_KEY) === 'true'
+  } catch (error) {
+    return false
+  }
+}
+
+export const setPushNotificationsEnabled = (enabled) => {
+  try {
+    localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false')
+  } catch (error) {
+    // ignore storage write issues
+  }
 }
 
 export const showSystemNotification = async (notification) => {

@@ -67,6 +67,23 @@
             Загрузить данные
           </button>
 
+          <button
+            v-if="currentUserRole === 'admin'"
+            class="wide-button"
+            :disabled="isRunningForecastPipeline"
+            @click="runAdminModelTraining"
+          >
+            {{ isRunningForecastPipeline ? 'Обучаем...' : 'Обучить модель' }}
+          </button>
+
+          <div v-if="currentUserRole === 'admin' && forecastRunError" class="form-alert error">
+            {{ forecastRunError }}
+          </div>
+
+          <div v-if="currentUserRole === 'admin' && forecastRunSuccess" class="form-alert success">
+            {{ forecastRunSuccess }}
+          </div>
+
           <button v-if="currentUserRole === 'admin'" class="wide-button secondary" @click="openCreateVenueModal">
             Создать заведение
           </button>
@@ -581,7 +598,7 @@ import NotificationBell from '../components/NotificationBell.vue'
 import ThemedSelect from '../components/ThemedSelect.vue'
 import logoSupra from '../assets/Logo_supra.png'
 import { fetchCurrentUser, logoutUser } from '../services/auth'
-import { uploadHistoricalForecastFile } from '../services/forecast'
+import { runForecastPipeline, uploadHistoricalForecastFile } from '../services/forecast'
 
 const ROLE_LABELS = {
   admin: 'Администратор',
@@ -676,6 +693,7 @@ export default {
       isCreatingRole: false,
       isCreatingVenue: false,
       isUploadingForecastData: false,
+      isRunningForecastPipeline: false,
       isSavingManagedEmployee: false,
       employeesError: '',
       manageEmployeeError: '',
@@ -684,6 +702,8 @@ export default {
       createRoleSuccess: '',
       createVenueError: '',
       createVenueSuccess: '',
+      forecastRunError: '',
+      forecastRunSuccess: '',
       uploadDataError: '',
       uploadDataSuccess: '',
       copyNotice: '',
@@ -1039,6 +1059,53 @@ export default {
       this.forecastUploadFileName = ''
       this.forecastUploadPreview = []
       this.forecastUploadVenueId = ''
+    },
+    getTrainingVenueId() {
+      if (this.currentVenueId !== null && this.currentVenueId !== undefined && this.currentVenueId !== '') {
+        return Number(this.currentVenueId)
+      }
+
+      const firstVenueId = this.venueOptions[0]?.value
+
+      if (firstVenueId !== null && firstVenueId !== undefined && firstVenueId !== '') {
+        return Number(firstVenueId)
+      }
+
+      return null
+    },
+    async runAdminModelTraining() {
+      if (this.currentUserRole !== 'admin' || this.isRunningForecastPipeline) {
+        return
+      }
+
+      const venueId = this.getTrainingVenueId()
+
+      if (!Number.isFinite(venueId)) {
+        this.forecastRunError = 'Не удалось определить заведение для обучения модели'
+        this.forecastRunSuccess = ''
+        return
+      }
+
+      this.isRunningForecastPipeline = true
+      this.forecastRunError = ''
+      this.forecastRunSuccess = ''
+
+      try {
+        const response = await runForecastPipeline({
+          venue: venueId,
+          processData: true,
+          trainModel: true,
+          makeForecast: false,
+          evaluate: true
+        })
+
+        const runId = response?.id ? ` Запуск #${response.id}.` : ''
+        this.forecastRunSuccess = `Обучение модели запущено.${runId}`
+      } catch (error) {
+        this.forecastRunError = error?.message || 'Не удалось запустить обучение модели'
+      } finally {
+        this.isRunningForecastPipeline = false
+      }
     },
     async handleForecastFileChange(event) {
       const file = event?.target?.files?.[0]

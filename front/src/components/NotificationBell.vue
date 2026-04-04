@@ -27,15 +27,6 @@
           </div>
           <div class="notification-head-actions">
             <button
-              v-if="canTogglePush"
-              class="notification-head-action"
-              type="button"
-              :disabled="isRequestingPushPermission"
-              @click="handleTogglePush"
-            >
-              {{ pushButtonLabel }}
-            </button>
-            <button
               v-if="notifications.length > 0"
               class="notification-head-action"
               type="button"
@@ -57,9 +48,6 @@
 
         <div v-if="error" class="notification-state is-error">
           {{ error }}
-        </div>
-        <div v-if="!error && pushStateLabel" class="notification-state">
-          {{ pushStateLabel }}
         </div>
         <div v-if="!error && isLoading && notifications.length === 0" class="notification-state">
           {{ t.loading }}
@@ -131,21 +119,19 @@ import {
   fetchNotifications,
   fetchUnreadNotificationsCount,
   getSystemNotificationPermission,
+  isPushNotificationsEnabled,
   markAllNotificationsAsRead,
   markNotificationAsRead,
   notificationCanConfirm,
   notificationCanReject,
   notificationNeedsDecision,
   rejectNotification,
-  requestSystemNotificationPermission,
   showSystemNotification,
-  supportsSystemNotifications
 } from '../services/notifications'
 
 const POLL_INTERVAL_MS = 15000
 const HIDDEN_NOTIFICATIONS_STORAGE_KEY = 'hidden_notification_ids'
 const SHOWN_SYSTEM_NOTIFICATION_IDS_KEY = 'shown_system_notification_ids'
-const PUSH_ENABLED_STORAGE_KEY = 'push_notifications_enabled'
 
 const readHiddenNotificationIds = () => {
   try {
@@ -165,22 +151,10 @@ const readShownSystemNotificationIds = () => {
   }
 }
 
-const readPushEnabled = () => {
-  try {
-    return localStorage.getItem(PUSH_ENABLED_STORAGE_KEY) === 'true'
-  } catch (error) {
-    return false
-  }
-}
-
 const TEXT = {
   open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
   events: '\u0421\u043e\u0431\u044b\u0442\u0438\u044f',
   notifications: '\u0423\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  enablePush: '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c push',
-  disablePush: '\u0412\u044b\u043a\u043b\u044e\u0447\u0438\u0442\u044c push \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f',
-  enablingPush: '\u0412\u043a\u043b\u044e\u0447\u0430\u0435\u043c...',
-  pushBlocked: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0437\u0430\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u043d\u044b',
   clear: '\u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c',
   reading: '\u0427\u0438\u0442\u0430\u0435\u043c...',
   readAll: '\u041f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0432\u0441\u0435',
@@ -205,7 +179,6 @@ export default {
       isOpen: false,
       isLoading: false,
       isMarkingAll: false,
-      isRequestingPushPermission: false,
       actionLoadingId: null,
       error: '',
       unreadCount: 0,
@@ -213,23 +186,12 @@ export default {
       hiddenNotificationIds: readHiddenNotificationIds(),
       shownSystemNotificationIds: readShownSystemNotificationIds(),
       systemNotificationPermission: getSystemNotificationPermission(),
-      pushEnabled: readPushEnabled()
+      pushEnabled: isPushNotificationsEnabled()
     }
   },
   computed: {
     badgeLabel() {
       return this.unreadCount > 99 ? '99+' : String(this.unreadCount)
-    },
-    canTogglePush() {
-      return supportsSystemNotifications() && this.systemNotificationPermission !== 'denied'
-    },
-    pushButtonLabel() {
-      if (this.isRequestingPushPermission) return this.t.enablingPush
-      return this.pushEnabled ? this.t.disablePush : this.t.enablePush
-    },
-    pushStateLabel() {
-      if (this.systemNotificationPermission === 'denied') return this.t.pushBlocked
-      return ''
     }
   },
   async mounted() {
@@ -357,34 +319,6 @@ export default {
       this.isOpen = !this.isOpen
       if (this.isOpen) {
         await this.refreshNotifications()
-      }
-    },
-    async handleTogglePush() {
-      if (!this.canTogglePush || this.isRequestingPushPermission) return
-      this.isRequestingPushPermission = true
-      this.error = ''
-
-      try {
-        if (!this.pushEnabled) {
-          this.systemNotificationPermission = await requestSystemNotificationPermission()
-          if (this.systemNotificationPermission === 'granted') {
-            this.pushEnabled = true
-            localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'true')
-            await this.syncNotifications({ silent: true, showSystem: false })
-          }
-        } else {
-          this.pushEnabled = false
-          localStorage.setItem(PUSH_ENABLED_STORAGE_KEY, 'false')
-          const registration = await navigator.serviceWorker.ready
-          const subscription = await registration.pushManager.getSubscription()
-          if (subscription) {
-            await subscription.unsubscribe().catch(() => undefined)
-          }
-        }
-      } catch (error) {
-        this.error = error?.message || this.t.loadError
-      } finally {
-        this.isRequestingPushPermission = false
       }
     },
     handleOutsideClick(event) {

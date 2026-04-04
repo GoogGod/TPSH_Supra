@@ -51,6 +51,13 @@ import { useRoute, useRouter } from 'vue-router'
 import '../assets/supra-style.css'
 import logoSupra from '../assets/Logo_supra.png'
 import { loginUser } from '../services/auth'
+import {
+  getSystemNotificationPermission,
+  isPushNotificationsEnabled,
+  requestSystemNotificationPermission,
+  setPushNotificationsEnabled,
+  supportsSystemNotifications
+} from '../services/notifications'
 
 const router = useRouter()
 const route = useRoute()
@@ -61,6 +68,7 @@ const errorMessage = ref('')
 const loading = ref(false)
 
 const USE_MOCK_AUTH = import.meta.env.VITE_USE_MOCK_AUTH === 'true'
+const PUSH_PROMPT_TEXT = '\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c push-\u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u044f \u0432 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0435?'
 
 if (localStorage.getItem('access')) {
   router.replace('/cabinet')
@@ -123,8 +131,6 @@ const handleMockLogin = async () => {
   localStorage.setItem('refresh', 'mock_refresh_token')
   localStorage.setItem('isAuthenticated', 'true')
   localStorage.setItem('user', JSON.stringify(foundUser.user))
-
-  await router.push(route.query.redirect || '/cabinet')
 }
 
 const handleBackendLogin = async () => {
@@ -132,8 +138,29 @@ const handleBackendLogin = async () => {
     username: username.value.trim(),
     password: password.value
   })
+}
 
-  await router.push(route.query.redirect || '/cabinet')
+const promptPushNotificationsAfterLogin = async () => {
+  if (!supportsSystemNotifications() || isPushNotificationsEnabled()) {
+    return
+  }
+
+  const permission = getSystemNotificationPermission()
+
+  if (permission === 'denied') {
+    setPushNotificationsEnabled(false)
+    return
+  }
+
+  const shouldEnable = window.confirm(PUSH_PROMPT_TEXT)
+
+  if (!shouldEnable) {
+    setPushNotificationsEnabled(false)
+    return
+  }
+
+  const nextPermission = await requestSystemNotificationPermission()
+  setPushNotificationsEnabled(nextPermission === 'granted')
 }
 
 const handleLogin = async () => {
@@ -146,6 +173,9 @@ const handleLogin = async () => {
     } else {
       await handleBackendLogin()
     }
+
+    await promptPushNotificationsAfterLogin()
+    await router.push(route.query.redirect || '/cabinet')
   } catch (error) {
     errorMessage.value = error.message || 'Ошибка авторизации'
   } finally {
