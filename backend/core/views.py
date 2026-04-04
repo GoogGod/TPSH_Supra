@@ -3,6 +3,10 @@ from django.http import HttpResponse, JsonResponse
 from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 from django.views.generic import View
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import IsAdminUser
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 
 class FrontendAppView(View):
@@ -35,3 +39,13 @@ class HealthCheckView(View):
         except Exception as exc:
             return JsonResponse({"status": "error", "detail": str(exc)}, status=503)
         return JsonResponse({"status": "ok"}, status=200)
+
+
+class AdminOnlySchemaView(SpectacularAPIView):
+    authentication_classes = (JWTAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+
+class AdminOnlySwaggerView(SpectacularSwaggerView):
+    authentication_classes = (JWTAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)

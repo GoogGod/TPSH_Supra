@@ -39,3 +39,6 @@ CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS.copy()
 
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+ENABLE_ADMIN_ROUTES = True
+ENABLE_API_DOCS = True
+

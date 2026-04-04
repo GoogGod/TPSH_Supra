@@ -111,6 +111,10 @@ STATICFILES_DIRS = [FRONTEND_STATIC_DIR] if FRONTEND_STATIC_DIR.exists() else []
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Public surface controls
+ENABLE_ADMIN_ROUTES = True
+ENABLE_API_DOCS = True
+
 # DRF
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
