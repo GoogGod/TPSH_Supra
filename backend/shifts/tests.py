@@ -137,6 +137,32 @@ class ShiftsApiTests(APITestCase):
         self.assertEqual(slot_1.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_PRO)
         self.assertEqual(slot_2.employee_level, WaiterSlot.EmployeeLevel.EMPLOYEE_NOOB)
 
+    def test_parser_fills_default_shift_times_when_missing(self):
+        csv_content = """date,waiter_id,waiter_num,waiter_type,waiter_type_code,shift_type_code,shift_type,work_hours,waiters_needed
+2026-04-01,Waiter 1,1,specialist,1.0,2,morning,6,4
+2026-04-01,Waiter 2,2,novice,2.0,3,evening,9,4
+"""
+        schedule = parse_schedule_csv(csv_content, self.venue)
+
+        morning_entry = (
+            ScheduleEntry.objects.filter(slot__schedule=schedule, slot__waiter_num=1)
+            .order_by("date")
+            .first()
+        )
+        evening_entry = (
+            ScheduleEntry.objects.filter(slot__schedule=schedule, slot__waiter_num=2)
+            .order_by("date")
+            .first()
+        )
+
+        self.assertEqual(morning_entry.shift_type, ScheduleEntry.ShiftType.MORNING)
+        self.assertEqual(morning_entry.work_start, time(10, 0))
+        self.assertEqual(morning_entry.work_end, time(16, 0))
+
+        self.assertEqual(evening_entry.shift_type, ScheduleEntry.ShiftType.EVENING)
+        self.assertEqual(evening_entry.work_start, time(16, 0))
+        self.assertEqual(evening_entry.work_end, time(1, 0))
+
     def test_scheduler_profile_does_not_force_ratio_on_single_role(self):
         only_pro_venue = Venue.objects.create(
             name="Only Pro Venue",

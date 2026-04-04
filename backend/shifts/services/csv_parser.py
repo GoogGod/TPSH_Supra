@@ -1,6 +1,6 @@
-﻿import csv
+import csv
 import io
-from datetime import datetime
+from datetime import datetime, time
 
 from django.db import transaction
 
@@ -18,6 +18,12 @@ SHIFT_PATTERN_MAP = {
     "morning": "morning",
     "evening": "evening",
     "shift": "full",
+}
+
+DEFAULT_SHIFT_TIMES = {
+    "full": (time(10, 0), time(22, 0)),
+    "morning": (time(10, 0), time(16, 0)),
+    "evening": (time(16, 0), time(1, 0)),
 }
 
 # Маппинг колонок от разных версий scheduler -> единый формат parser.
@@ -179,6 +185,12 @@ def _parse_row(row):
 
     work_start = _parse_time(row.get("work_start", ""))
     work_end = _parse_time(row.get("work_end", ""))
+    work_start, work_end = _fill_shift_time_defaults(
+        shift_type=shift_type,
+        is_working=is_working,
+        work_start=work_start,
+        work_end=work_end,
+    )
     employee_level = _parse_waiter_level(
         waiter_type=row.get("waiter_type"),
         waiter_type_code=row.get("waiter_type_code"),
@@ -196,6 +208,23 @@ def _parse_row(row):
         "work_end": work_end,
         "work_hours": work_hours,
     }
+
+
+def _fill_shift_time_defaults(*, shift_type: str, is_working: bool, work_start, work_end):
+    if not is_working or shift_type == "off":
+        return work_start, work_end
+
+    default_window = DEFAULT_SHIFT_TIMES.get(shift_type)
+    if not default_window:
+        return work_start, work_end
+
+    default_start, default_end = default_window
+    if work_start is None:
+        work_start = default_start
+    if work_end is None:
+        work_end = default_end
+
+    return work_start, work_end
 
 
 def _parse_date(value: str):
