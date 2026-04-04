@@ -57,3 +57,75 @@ class MLRunnerDateRangeTests(TestCase):
         self.assertEqual(run.status, ForecastRun.Status.COMPLETED)
         self.assertEqual(captured_kwargs["from_date"], "2026-04-01")
         self.assertEqual(captured_kwargs["to_date"], "2026-04-30 23:59:59")
+
+    def test_execute_remaps_noob_ratio_to_novice_ratio(self):
+        run = ForecastRun.objects.create(
+            venue=self.venue,
+            process_data=False,
+            train_model=False,
+            make_forecast=False,
+            evaluate=False,
+        )
+
+        captured_kwargs = {}
+
+        fake_main_module = types.ModuleType("ml_data.main")
+        fake_main_module.DATA_PRED_DIR = "."
+
+        def fake_main(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {}
+
+        fake_main_module.main = fake_main
+
+        fake_ml_data_package = types.ModuleType("ml_data")
+        fake_ml_data_package.main = fake_main_module
+
+        with patch.dict(
+            sys.modules,
+            {
+                "ml_data": fake_ml_data_package,
+                "ml_data.main": fake_main_module,
+            },
+        ):
+            runner = MLRunner(run)
+            runner.execute(make_schedule=True, pipeline_kwargs={"noob_ratio": 0.25})
+
+        self.assertNotIn("noob_ratio", captured_kwargs)
+        self.assertEqual(captured_kwargs["novice_ratio"], 0.25)
+
+    def test_execute_drops_none_novice_ratio(self):
+        run = ForecastRun.objects.create(
+            venue=self.venue,
+            process_data=False,
+            train_model=False,
+            make_forecast=False,
+            evaluate=False,
+        )
+
+        captured_kwargs = {}
+
+        fake_main_module = types.ModuleType("ml_data.main")
+        fake_main_module.DATA_PRED_DIR = "."
+
+        def fake_main(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {}
+
+        fake_main_module.main = fake_main
+
+        fake_ml_data_package = types.ModuleType("ml_data")
+        fake_ml_data_package.main = fake_main_module
+
+        with patch.dict(
+            sys.modules,
+            {
+                "ml_data": fake_ml_data_package,
+                "ml_data.main": fake_main_module,
+            },
+        ):
+            runner = MLRunner(run)
+            runner.execute(make_schedule=True, pipeline_kwargs={"noob_ratio": None})
+
+        self.assertNotIn("noob_ratio", captured_kwargs)
+        self.assertNotIn("novice_ratio", captured_kwargs)

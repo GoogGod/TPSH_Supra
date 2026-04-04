@@ -48,7 +48,20 @@ class MLRunner:
                 "verbose": False,
             }
             if pipeline_kwargs:
-                kwargs.update(pipeline_kwargs)
+                normalized_pipeline_kwargs = dict(pipeline_kwargs)
+                # Backward compatibility:
+                # old integration used noob_ratio, new ml_data expects novice_ratio.
+                if (
+                    "noob_ratio" in normalized_pipeline_kwargs
+                    and "novice_ratio" not in normalized_pipeline_kwargs
+                ):
+                    normalized_pipeline_kwargs["novice_ratio"] = normalized_pipeline_kwargs.pop(
+                        "noob_ratio"
+                    )
+                # Let ml_data defaults work when ratio is intentionally unspecified.
+                if normalized_pipeline_kwargs.get("novice_ratio") is None:
+                    normalized_pipeline_kwargs.pop("novice_ratio", None)
+                kwargs.update(normalized_pipeline_kwargs)
 
             if self.run.forecast_from:
                 kwargs["from_date"] = self.run.forecast_from.strftime("%Y-%m-%d")

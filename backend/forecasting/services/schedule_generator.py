@@ -1,59 +1,68 @@
 """
-Генерация расписания:
-1. Вызвать scheduler.py из ml_data → получить waiter_schedule.csv
-2. Прочитать CSV и создать MonthlySchedule + WaiterSlots + ScheduleEntries
+Schedule generation adapter for ml_data.
+
+Flow:
+1. Run ml_data scheduler -> waiter_schedule.csv
+2. Parse CSV into MonthlySchedule + slots + entries
 """
 
 import os
 import traceback
+from pathlib import Path
 
+import pandas as pd
 from django.conf import settings
-from django.utils import timezone
 
-from shifts.services.csv_parser import parse_schedule_csv, CSVParseError
+from shifts.services.csv_parser import CSVParseError, parse_schedule_csv
 
 
 class ScheduleGenerationError(Exception):
     pass
 
 
+def _import_scheduler_algorithm():
+    """Import scheduler entrypoint from new/legacy ml_data layouts."""
+    try:
+        from ml_data.scheduler_algorithm import create_waiter_schedule_algorithm
+
+        return create_waiter_schedule_algorithm
+    except Exception:
+        # Compatibility for local runs when ml_data is resolved via cwd.
+        from scheduler_algorithm import create_waiter_schedule_algorithm
+
+        return create_waiter_schedule_algorithm
+
+
 def run_scheduler():
     """
-    Вызвать ml_data/scheduler.py для генерации waiter_schedule.csv.
-    Scheduler читает data/predicted/forecast.csv и создаёт расписание.
+    Invoke ml_data scheduler to generate waiter_schedule.csv from forecast.csv.
     """
     original_cwd = os.getcwd()
 
     try:
         os.chdir(settings.ML_DATA_DIR)
 
-        from ml_data import scheduler as scheduler_module
+        forecast_path = Path(settings.ML_DATA_PREDICTED) / "forecast.csv"
+        output_path = Path(settings.ML_DATA_PREDICTED) / "waiter_schedule.csv"
 
-        forecast_path = str(settings.ML_DATA_PREDICTED / "forecast.csv")
-        output_path = str(settings.ML_DATA_PREDICTED / "waiter_schedule.csv")
+        if not forecast_path.exists():
+            raise ScheduleGenerationError(f"Forecast file not found: {forecast_path}")
 
-        if hasattr(scheduler_module, "main") and callable(scheduler_module.main):
-            scheduler_module.main(
-                forecast_path=forecast_path,
-                output_path=output_path,
-                verbose=False,
-            )
-        elif hasattr(scheduler_module, "create_waiter_schedule") and callable(
-            scheduler_module.create_waiter_schedule
-        ):
-            scheduler_module.create_waiter_schedule(
-                forecast_path=forecast_path,
-                output_path=output_path,
-                verbose=False,
-            )
-        else:
-            raise ScheduleGenerationError(
-                "scheduler.py не содержит ни main(), ни create_waiter_schedule()."
-            )
+        create_waiter_schedule_algorithm = _import_scheduler_algorithm()
+
+        forecast_df = pd.read_csv(forecast_path)
+        if forecast_df.empty:
+            raise ScheduleGenerationError("forecast.csv is empty")
+
+        create_waiter_schedule_algorithm(
+            forecast_df=forecast_df,
+            output_path=str(output_path),
+            verbose=False,
+        )
 
     except Exception as e:
         raise ScheduleGenerationError(
-            f"Ошибка scheduler.py: {type(e).__name__}: {e}\n{traceback.format_exc()}"
+            f"Scheduler error: {type(e).__name__}: {e}\n{traceback.format_exc()}"
         )
     finally:
         os.chdir(original_cwd)
@@ -61,40 +70,30 @@ def run_scheduler():
 
 def load_generated_schedule(venue):
     """
-    Прочитать waiter_schedule.csv и создать MonthlySchedule.
-    Использует существующий csv_parser из shifts.
-
-    Возвращает MonthlySchedule (draft).
+    Read waiter_schedule.csv and create MonthlySchedule via existing parser.
     """
-    csv_path = settings.ML_DATA_PREDICTED / "waiter_schedule.csv"
+    csv_path = Path(settings.ML_DATA_PREDICTED) / "waiter_schedule.csv"
 
     if not csv_path.exists():
         raise ScheduleGenerationError(
-            f"Файл расписания не найден: {csv_path}. "
-            "Убедитесь что scheduler.py отработал."
+            f"Schedule file not found: {csv_path}. Ensure scheduler completed successfully."
         )
 
     try:
         with open(csv_path, "r", encoding="utf-8-sig") as f:
             csv_content = f.read()
 
-        schedule = parse_schedule_csv(csv_content, venue)
-        return schedule
+        return parse_schedule_csv(csv_content, venue)
 
     except CSVParseError as e:
-        raise ScheduleGenerationError(f"Ошибка парсинга расписания: {e}")
+        raise ScheduleGenerationError(f"Schedule CSV parse error: {e}")
 
 
 def generate_schedule_full(venue, forecast_run=None):
     """
-    Полный цикл: scheduler.py → чтение CSV → MonthlySchedule.
-
-    Возвращает dict с результатами.
+    Full cycle: scheduler -> CSV parse -> MonthlySchedule.
     """
-    # Шаг 1: запустить scheduler
     run_scheduler()
-
-    # Шаг 2: загрузить в MonthlySchedule
     schedule = load_generated_schedule(venue)
 
     return {
@@ -102,7 +101,5 @@ def generate_schedule_full(venue, forecast_run=None):
         "year": schedule.year,
         "month": schedule.month,
         "slots_count": schedule.slots.count(),
-        "entries_count": sum(
-            slot.entries.count() for slot in schedule.slots.all()
-        ),
+        "entries_count": sum(slot.entries.count() for slot in schedule.slots.all()),
     }

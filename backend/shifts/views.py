@@ -1113,7 +1113,11 @@ class GenerateMonthlyScheduleView(APIView):
         if ml_data_path not in sys.path:
             sys.path.insert(0, ml_data_path)
 
-        from ml_data.scheduler import create_waiter_schedule
+        try:
+            from ml_data.scheduler_algorithm import create_waiter_schedule_algorithm
+        except Exception:
+            # Compatibility with older local runs where ml_data isn't namespace-importable.
+            from scheduler_algorithm import create_waiter_schedule_algorithm
 
         schedule_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1129,19 +1133,22 @@ class GenerateMonthlyScheduleView(APIView):
 
         hour_attempts = [200, 160, 120, 80, 40, 0]
 
+        import pandas as pd
+
+        forecast_df = pd.read_csv(forecast_csv_path)
+
         for ratio in ordered_ratio_attempts:
             for min_hours in hour_attempts:
                 kwargs = {
-                    "forecast_path": str(forecast_csv_path),
+                    "forecast_df": forecast_df,
                     "output_path": str(schedule_csv_path),
-                    "min_hours_per_waiter": int(min_hours),
-                    "best_effort": True,
+                    "min_hours_per_month": int(min_hours),
                     "verbose": False,
                 }
                 if ratio is not None:
-                    kwargs["noob_ratio"] = float(ratio)
+                    kwargs["novice_ratio"] = float(ratio)
 
-                schedule_df, _ = create_waiter_schedule(**kwargs)
+                schedule_df, _ = create_waiter_schedule_algorithm(**kwargs)
             if GenerateMonthlyScheduleView._has_working_shifts(schedule_df):
                 if not schedule_csv_path.exists() or schedule_csv_path.stat().st_size == 0:
                     raise FileNotFoundError(f"Файл расписания не создан: {schedule_csv_path}")
@@ -1317,12 +1324,13 @@ class GenerateMonthlyScheduleView(APIView):
 
         try:
             runner = MLRunner(forecast_run)
+            pipeline_kwargs = {}
+            if noob_ratio is not None:
+                pipeline_kwargs["novice_ratio"] = noob_ratio
             runner.execute(
                 predicted_dir=run_outputs_dir,
                 make_schedule=True,
-                pipeline_kwargs={
-                    "noob_ratio": noob_ratio,
-                },
+                pipeline_kwargs=pipeline_kwargs,
             )
         except Exception:
             return Response(

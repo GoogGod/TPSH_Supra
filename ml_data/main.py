@@ -5,16 +5,14 @@ from src.models.train import train
 from src.models.predict import predict
 from src.models.evaluate import evaluate_model
 from src.export import save_forecast_to_csv
+from scheduler_algorithm import create_waiter_schedule_algorithm
 from src.config import (
     RAW_EXCEL_FILE, RAW_DATA_FILE,
     MODEL_FILE, DATA_PRED_DIR, MIN_WAITERS_ABSOLUTE, DATA_RAW_NEW_DIR
 )
-from datetime import timedelta
-from scheduler import create_waiter_schedule
 from pathlib import Path
 from typing import Optional, Union
 from datetime import datetime
-import pandas as pd
 import os
 
 def main(
@@ -26,7 +24,7 @@ def main(
     incremental_training: bool = False,
     model_type: str = 'xgboost',
     min_hours_per_waiter: int = 200,
-    noob_ratio: Optional[float] = None,
+    novice_ratio: float = 0.5,
     from_date: Optional[Union[str, datetime]] = None,
     to_date: Optional[Union[str, datetime]] = None,
     hours_ahead: int = 168,
@@ -162,15 +160,12 @@ def main(
     if make_schedule and forecast is not None:
         print("\nПЛАНИРОВАНИЕ СМЕН ОФИЦИАНТОВ")
 
-        from scheduler import create_waiter_schedule
-
-        schedule_df, schedule_stats = create_waiter_schedule(
-            forecast_path=f'{DATA_PRED_DIR}/forecast.csv',
-            output_path=f'{DATA_PRED_DIR}/waiter_schedule.csv',
-            min_hours_per_waiter=min_hours_per_waiter,
-            best_effort=True,
-            noob_ratio=noob_ratio,
-            verbose=verbose
+        schedule_df, schedule_stats = create_waiter_schedule_algorithm(
+            forecast_df=forecast,
+            min_hours_per_month=min_hours_per_waiter,
+            novice_ratio=novice_ratio,
+            verbose=verbose,
+            output_path=f'{DATA_PRED_DIR}/waiter_schedule.csv'
         )
     else:
         print("\nПропускаем планирование смен")
@@ -248,9 +243,9 @@ if __name__ == '__main__':
         incremental_training=False,
         model_type='xgboost',
         min_hours_per_waiter=200,
-        noob_ratio=0.3,
+        novice_ratio=0.3,
         verbose=True,
         force_fresh_weather=True,
         from_date='2026-05-01',
-        to_date='2026-06-01'
+        to_date='2026-08-01'
     )
