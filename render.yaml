@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: supra-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    plan: free
+    healthCheckPath: /api/v1/healthz/
+    disk:
+      name: supra-ml-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DJANGO_ENV
+        value: production
+      - key: ML_DATA_DIR
+        value: /var/data/ml_data
+      - key: DJANGO_DB_PATH
+        value: /var/data/db.sqlite3
+      - key: ALLOWED_HOSTS
+        value: tpsh-supra-k1v6.onrender.com,tpsh-supra.onrender.com
+      - key: CORS_ORIGINS
+        value: https://tpsh-supra-k1v6.onrender.com,https://tpsh-supra.onrender.com
+      - key: JWT_ACCESS_TOKEN_MINUTES
+        value: 480
+      - key: JWT_REFRESH_TOKEN_DAYS
+        value: 30
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: admin
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: admin@example.com
+      - key: DJANGO_SUPERUSER_PASSWORD
+        generateValue: true
+      - key: SECRET_KEY
+        generateValue: true

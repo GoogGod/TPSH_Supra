@@ -1,14 +1,15 @@
-from django.conf import settings
+﻿from django.conf import settings
 from django.db import models
+
 from common.mixins import TimestampMixin
 
 
 class Notification(TimestampMixin):
-
     class Type(models.TextChoices):
         SCHEDULE_PUBLISHED = "schedule_published", "Новое расписание опубликовано"
         SLOT_CLAIMED = "slot_claimed", "Сотрудник занял позицию"
         MANUAL_ASSIGNMENT = "manual_assignment", "Ручное назначение"
+        ASSIGNMENT_UNASSIGNED = "assignment_unassigned", "Назначение отменено"
         ASSIGNMENT_ACCEPTED = "assignment_accepted", "Назначение подтверждено"
         ASSIGNMENT_REJECTED = "assignment_rejected", "Назначение отклонено"
         SCHEDULE_REMINDER = "schedule_reminder", "Напоминание о расписании"
@@ -38,7 +39,7 @@ class Notification(TimestampMixin):
 
     is_read = models.BooleanField(default=False, verbose_name="Прочитано", db_index=True)
 
-    # ── Подтверждение (для manual_assignment) ──
+    # Подтверждение (для manual_assignment)
     requires_confirmation = models.BooleanField(default=False, verbose_name="Требует подтверждения")
     confirmation_status = models.CharField(
         max_length=10,
@@ -48,7 +49,7 @@ class Notification(TimestampMixin):
     )
     confirmed_at = models.DateTimeField(null=True, blank=True, verbose_name="Подтверждено в")
 
-    # ── Связи с расписанием (строковые FK — без circular import) ──
+    # Связи с расписанием (строковые FK без циклического импорта)
     related_schedule = models.ForeignKey(
         "shifts.MonthlySchedule",
         on_delete=models.CASCADE,
@@ -73,4 +74,4 @@ class Notification(TimestampMixin):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"[{self.get_notification_type_display()}] → {self.recipient}"
+        return f"[{self.get_notification_type_display()}] -> {self.recipient}"

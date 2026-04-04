@@ -34,6 +34,11 @@ COLUMN_ALIASES = {
     "start": "work_start",
     "end": "work_end",
     "hours": "work_hours",
+    "waiter_type": "waiter_type",
+    "waiter_type_code": "waiter_type_code",
+    "waiter_level": "waiter_type",
+    "employee_level": "waiter_type",
+    "waiter_capacity": "waiter_capacity",
 }
 
 
@@ -122,9 +127,18 @@ def parse_schedule_csv(csv_file, venue):
         waiter_nums = sorted(set(r["waiter_num"] for r in rows))
         slots = {}
         for num in waiter_nums:
+            level = next(
+                (
+                    r.get("employee_level")
+                    for r in rows
+                    if r["waiter_num"] == num and r.get("employee_level") is not None
+                ),
+                None,
+            )
             slot = WaiterSlot.objects.create(
                 schedule=schedule,
                 waiter_num=num,
+                employee_level=level,
             )
             slots[num] = slot
 
@@ -165,10 +179,16 @@ def _parse_row(row):
 
     work_start = _parse_time(row.get("work_start", ""))
     work_end = _parse_time(row.get("work_end", ""))
+    employee_level = _parse_waiter_level(
+        waiter_type=row.get("waiter_type"),
+        waiter_type_code=row.get("waiter_type_code"),
+        waiter_capacity=row.get("waiter_capacity"),
+    )
 
     return {
         "date": date,
         "waiter_num": waiter_num,
+        "employee_level": employee_level,
         "is_working": is_working,
         "shift_type": shift_type,
         "waiters_needed": waiters_needed,
@@ -242,3 +262,60 @@ def _parse_bool(value):
         return bool(int(float(value_str)))
     except (ValueError, TypeError):
         return False
+
+
+def _parse_waiter_level(*, waiter_type, waiter_type_code, waiter_capacity=None):
+    type_raw = str(waiter_type or "").strip().lower()
+    code_raw = str(waiter_type_code or "").strip().lower()
+
+    if type_raw in {
+        "employee_pro",
+        "pro",
+        "professional",
+        "specialist",
+        "профессионал",
+        "специалист",
+        "опытный",
+    }:
+        return "employee_pro"
+    if type_raw in {
+        "employee_noob",
+        "noob",
+        "novice",
+        "intern",
+        "trainee",
+        "новичок",
+        "стажер",
+        "стажёр",
+    }:
+        return "employee_noob"
+
+    if code_raw in {"pro", "p"}:
+        return "employee_pro"
+    if code_raw in {"noob", "n"}:
+        return "employee_noob"
+
+    # Поддержка "1.0"/"2.0"
+    try:
+        code_num = int(float(code_raw))
+    except (TypeError, ValueError):
+        code_num = None
+
+    if code_num == 1:
+        return "employee_pro"
+    if code_num == 2:
+        return "employee_noob"
+
+    # Резерв для форматов без waiter_type_code: по capacity.
+    try:
+        capacity_num = float(str(waiter_capacity or "").strip())
+    except (TypeError, ValueError):
+        capacity_num = None
+
+    if capacity_num is not None:
+        if capacity_num >= 9:
+            return "employee_pro"
+        if 0 < capacity_num <= 6:
+            return "employee_noob"
+
+    return None

@@ -6,9 +6,8 @@ from .models import User
 class RegisterSerializer(serializers.ModelSerializer):
     """
     Создание нового сотрудника.
-    Вызывается менеджером/админом.
-    Пароль валидируется стандартными Django-валидаторами.
     """
+
     password = serializers.CharField(
         write_only=True,
         validators=[validate_password],
@@ -32,8 +31,6 @@ class RegisterSerializer(serializers.ModelSerializer):
             "phone",
             "role",
             "venue",
-            "schedule_pattern",
-            "shift_duration",
         ]
         extra_kwargs = {
             "email": {"required": True},
@@ -58,11 +55,6 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """
-    Чтение данных пользователя.
-    Используется в ответах (register, me, список).
-    venue возвращается как вложенный объект.
-    """
     venue_name = serializers.CharField(
         source="venue.name",
         read_only=True,
@@ -81,8 +73,26 @@ class UserSerializer(serializers.ModelSerializer):
             "role",
             "venue",
             "venue_name",
-            "schedule_pattern",
-            "shift_duration",
             "is_active",
         ]
         read_only_fields = fields
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    venue_name = serializers.CharField(source="venue.name", read_only=True, default=None)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "role",
+            "venue",
+            "venue_name",
+            "is_active",
+        ]
+        read_only_fields = ["id", "venue_name"]
