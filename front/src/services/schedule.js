@@ -128,7 +128,7 @@ const normalizeShiftType = (value, workStart, workEnd, workHours) => {
   const raw = String(value || '').trim().toLowerCase()
 
   if (raw) {
-    return raw
+    return raw === 'shift' ? 'custom' : raw
   }
 
   if (typeof workHours === 'number' && workHours >= 10) {
@@ -146,7 +146,7 @@ const normalizeShiftType = (value, workStart, workEnd, workHours) => {
     return startHours < 13 ? 'morning' : 'evening'
   }
 
-  return 'shift'
+  return 'custom'
 }
 
 const extractEmployee = (item) => {

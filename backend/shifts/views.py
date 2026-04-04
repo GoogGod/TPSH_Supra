@@ -362,7 +362,7 @@ class UpdateDraftScheduleEntriesView(APIView):
                                 "is_working": {"type": "boolean"},
                                 "shift_type": {
                                     "type": "string",
-                                    "enum": ["off", "full", "morning", "evening"],
+                                    "enum": ["off", "full", "morning", "evening", "custom"],
                                 },
                                 "waiters_needed": {"type": "integer"},
                                 "work_start": {"type": "string", "format": "time"},

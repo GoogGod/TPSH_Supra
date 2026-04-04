@@ -131,6 +131,7 @@ class ScheduleEntry(TimestampMixin):
         FULL = "full", "Полная"
         MORNING = "morning", "Утренняя"
         EVENING = "evening", "Вечерняя"
+        CUSTOM = "custom", "Произвольная"
 
     slot = models.ForeignKey(
         WaiterSlot,

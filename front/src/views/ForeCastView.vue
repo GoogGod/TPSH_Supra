@@ -295,7 +295,7 @@ const WAITER_COLORS = [
   '#d29a6a',
   '#7e74b8'
 ]
-const SHIFT_LABELS = { morning: 'Утренняя смена', evening: 'Вечерняя смена', full: 'Полный день', off: 'Выходной', shift: 'Произвольная смена' }
+const SHIFT_LABELS = { morning: 'Утренняя смена', evening: 'Вечерняя смена', full: 'Полный день', off: 'Выходной', custom: 'Произвольная смена' }
 const normalizeRole = (role) => String(role || '').toLowerCase()
 const normalizeIdentity = (value) => value === undefined || value === null || value === '' ? '' : String(value).toLowerCase()
 const asArray = (payload) => Array.isArray(payload) ? payload : Array.isArray(payload?.results) ? payload.results : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.data) ? payload.data : []
@@ -485,7 +485,7 @@ export default {
         { value: 'morning', label: 'Утренняя смена' },
         { value: 'evening', label: 'Вечерняя смена' },
         { value: 'full', label: 'Полный день' },
-        { value: 'shift', label: 'Произвольная смена' }
+        { value: 'custom', label: 'Произвольная смена' }
       ]
     },
     slotGradeOptions() {
@@ -609,7 +609,7 @@ export default {
       }
       this.selectedWaiter = this.waiters.find((item) => this.canSelectWaiter(item))?.slot_position_key || ''
     },
-    createEditableEntry(entry) { return { entry_id: entry.entry_id, date: entry.date, is_working: Boolean(entry.is_working), shift_type: entry.shift_type || 'shift', waiters_needed: Number(entry.waiters_needed ?? 1), work_start: entry.work_start || '', work_end: entry.work_end || '', work_hours: entry.work_hours ?? getHoursDifference(entry.work_start, entry.work_end) ?? 0 } },
+    createEditableEntry(entry) { return { entry_id: entry.entry_id, date: entry.date, is_working: Boolean(entry.is_working), shift_type: entry.shift_type || 'custom', waiters_needed: Number(entry.waiters_needed ?? 1), work_start: entry.work_start || '', work_end: entry.work_end || '', work_hours: entry.work_hours ?? getHoursDifference(entry.work_start, entry.work_end) ?? 0 } },
     buildDayEditorTitle() {
       if (!this.dayEditorEntry) return 'Редактирование дня'
       const dateLabel = this.formatEntryDate(this.dayEditorEntry.date)
@@ -638,8 +638,9 @@ export default {
 
       const original = this.dayEditorOriginalEntry || {}
       entry.is_working = true
-      entry.shift_type = String(original.shift_type || entry.shift_type || 'shift').toLowerCase()
-      if (!entry.shift_type || entry.shift_type === 'off') entry.shift_type = 'shift'
+      entry.shift_type = String(original.shift_type || entry.shift_type || 'custom').toLowerCase()
+      if (entry.shift_type === 'shift') entry.shift_type = 'custom'
+      if (!entry.shift_type || entry.shift_type === 'off') entry.shift_type = 'custom'
       entry.waiters_needed = Number(original.waiters_needed ?? entry.waiters_needed ?? 1) || 1
       entry.work_start = entry.work_start || original.work_start || '10:00'
       entry.work_end = entry.work_end || original.work_end || '19:00'
@@ -649,7 +650,7 @@ export default {
       const entry = this.dayEditorEntry
       if (!entry) return
       const shiftType = String(value || entry.shift_type || '').toLowerCase()
-      entry.shift_type = shiftType || 'shift'
+      entry.shift_type = shiftType === 'shift' ? 'custom' : (shiftType || 'custom')
       entry.is_working = true
       if (!entry.waiters_needed) entry.waiters_needed = 1
       entry.work_start = entry.work_start || this.dayEditorOriginalEntry?.work_start || '10:00'
@@ -662,7 +663,7 @@ export default {
       return {
         id: Number(entry.entry_id),
         is_working: Boolean(entry.is_working),
-        shift_type: entry.is_working ? String(entry.shift_type || 'shift').toLowerCase() : 'off',
+        shift_type: entry.is_working ? String(entry.shift_type || 'custom').toLowerCase().replace('shift', 'custom') : 'off',
         waiters_needed: entry.is_working ? Number(entry.waiters_needed ?? 0) : 0,
         work_start: entry.is_working ? formatTimeForApi(entry.work_start) : '',
         work_end: entry.is_working ? formatTimeForApi(entry.work_end) : '',
@@ -889,6 +890,7 @@ export default {
       if (normalized === 'full') return 'П'
       if (normalized === 'morning') return 'У'
       if (normalized === 'evening') return 'В'
+      if (normalized === 'custom' || normalized === 'shift') return 'Произ.'
       return this.getShiftLabel(shiftType)
     },
     getWaiterButtonStyle(waiter) { return waiter.slot_position_key !== this.selectedWaiter ? {} : { borderColor: waiter.color, boxShadow: `0 0 0 1px ${waiter.color} inset` } },

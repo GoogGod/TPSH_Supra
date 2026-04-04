@@ -161,6 +161,10 @@ const promptPushNotificationsAfterLogin = async () => {
 
   const nextPermission = await requestSystemNotificationPermission()
   setPushNotificationsEnabled(nextPermission === 'granted')
+
+  if (nextPermission === 'granted') {
+    window.dispatchEvent(new Event('notifications:refresh'))
+  }
 }
 
 const handleLogin = async () => {
@@ -176,6 +180,7 @@ const handleLogin = async () => {
 
     await promptPushNotificationsAfterLogin()
     await router.push(route.query.redirect || '/cabinet')
+    window.dispatchEvent(new Event('notifications:refresh'))
   } catch (error) {
     errorMessage.value = error.message || 'Ошибка авторизации'
   } finally {
