@@ -34,6 +34,16 @@ from user_notifications.services import (
 )
 
 
+def _deny_cross_venue_access(user, venue_id, detail="Доступ к этому объекту запрещен."):
+    if user.is_admin_role:
+        return None
+
+    if not user.venue_id or user.venue_id != venue_id:
+        return Response({"detail": detail}, status=status.HTTP_403_FORBIDDEN)
+
+    return None
+
+
 # ═══════════ Venues (без изменений) ═══════════
 
 class VenueListView(ListAPIView):
@@ -42,7 +52,13 @@ class VenueListView(ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        return Venue.objects.filter(is_active=True)
+        qs = Venue.objects.filter(is_active=True)
+        user = self.request.user
+        if user.is_manager and not user.is_admin_role:
+            if not user.venue_id:
+                return Venue.objects.none()
+            qs = qs.filter(id=user.venue_id)
+        return qs
 
 
 class VenueCreateView(APIView):
@@ -103,6 +119,10 @@ class UploadScheduleView(APIView):
                 {"detail": "Объект не найден."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        denied = _deny_cross_venue_access(request.user, venue.id)
+        if denied:
+            return denied
 
         try:
             schedule = parse_schedule_csv(csv_file, venue)
@@ -233,30 +253,6 @@ class MonthlyScheduleDetailView(APIView):
 
         return Response(data)
 
-class MonthlyScheduleDetailView(APIView):
-    """Детали расписания: все слоты + все записи."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        try:
-            schedule = MonthlySchedule.objects.prefetch_related(
-                "slots__entries",
-                "slots__assigned_employee",
-            ).select_related("venue").get(pk=pk)
-        except MonthlySchedule.DoesNotExist:
-            return Response({"detail": "Не найдено."}, status=404)
-
-        # Сотрудник видит только published
-        user = request.user
-        if user.is_employee and schedule.status != "published":
-            return Response({"detail": "Не найдено."}, status=404)
-        if user.is_employee and schedule.venue != user.venue:
-            return Response({"detail": "Не найдено."}, status=404)
-
-        serializer = MonthlyScheduleDetailSerializer(schedule)
-        return Response(serializer.data)
-
-
 # ═══════════ Публикация ═══════════
 
 class PublishScheduleView(APIView):
@@ -265,9 +261,13 @@ class PublishScheduleView(APIView):
 
     def post(self, request, pk):
         try:
-            schedule = MonthlySchedule.objects.get(pk=pk)
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
         except MonthlySchedule.DoesNotExist:
             return Response({"detail": "Не найдено."}, status=404)
+
+        denied = _deny_cross_venue_access(request.user, schedule.venue_id)
+        if denied:
+            return denied
 
         if schedule.status == "published":
             return Response(
@@ -325,9 +325,13 @@ class DeleteScheduleView(APIView):
 
     def delete(self, request, pk):
         try:
-            schedule = MonthlySchedule.objects.get(pk=pk)
+            schedule = MonthlySchedule.objects.select_related("venue").get(pk=pk)
         except MonthlySchedule.DoesNotExist:
             return Response({"detail": "Не найдено."}, status=404)
+
+        denied = _deny_cross_venue_access(request.user, schedule.venue_id)
+        if denied:
+            return denied
 
         if schedule.status == "published":
             return Response(
@@ -771,6 +775,10 @@ class AssignSlotView(APIView):
         except WaiterSlot.DoesNotExist:
             return Response({"detail": "Позиция не найдена."}, status=404)
 
+        denied = _deny_cross_venue_access(request.user, slot.schedule.venue_id)
+        if denied:
+            return denied
+
         try:
             employee = User.objects.get(
                 pk=employee_id,
@@ -827,9 +835,13 @@ class UnassignSlotView(APIView):
 
     def post(self, request, pk):
         try:
-            slot = WaiterSlot.objects.get(pk=pk)
+            slot = WaiterSlot.objects.select_related("schedule__venue").get(pk=pk)
         except WaiterSlot.DoesNotExist:
             return Response({"detail": "Позиция не найдена."}, status=404)
+
+        denied = _deny_cross_venue_access(request.user, slot.schedule.venue_id)
+        if denied:
+            return denied
 
         if slot.assignment_status == "open":
             return Response(
@@ -863,12 +875,19 @@ class ScheduleStatusView(APIView):
 
     def get(self, request):
         user = request.user
-        venue_id = request.query_params.get("venue")
+        venue_param = request.query_params.get("venue")
         year = request.query_params.get("year")
         month = request.query_params.get("month")
 
         # Определить venue
-        if venue_id:
+        if venue_param:
+            try:
+                venue_id = int(venue_param)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "Некорректный venue."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             try:
                 venue = Venue.objects.get(id=venue_id, is_active=True)
             except Venue.DoesNotExist:
@@ -880,6 +899,10 @@ class ScheduleStatusView(APIView):
                 {"detail": "Укажите venue или привяжите пользователя к объекту."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        denied = _deny_cross_venue_access(user, venue.id)
+        if denied:
+            return denied
 
         # Определить год/месяц (по умолчанию — следующий месяц)
         if year and month:

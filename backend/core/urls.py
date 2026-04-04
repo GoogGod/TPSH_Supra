@@ -1,10 +1,8 @@
 from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include, re_path
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from rest_framework_simplejwt.views import TokenRefreshView
+from users.auth_views import LoginView
 from users.views import MeView
 from users.urls import user_urlpatterns
 from .views import (
@@ -16,7 +14,7 @@ from .views import (
 
 urlpatterns = [
     # Auth
-    path("api/v1/auth/login/", TokenObtainPairView.as_view(), name="auth-login"),
+    path("api/v1/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="auth-refresh"),
     path("api/v1/auth/", include("users.urls")),
 
