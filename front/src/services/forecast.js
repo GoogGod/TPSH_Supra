@@ -61,7 +61,7 @@ export const uploadHistoricalForecastData = async (records) => {
 
   for (const payload of payloadVariants) {
     try {
-      const response = await api.post('/forecast/load-data/', payload)
+      const response = await api.post('/forecast/upload-data/', payload)
       return response.data
     } catch (error) {
       lastError = error
@@ -81,7 +81,7 @@ export const uploadHistoricalForecastFile = async (file, { venueId = null } = {}
     throw new Error('Не выбран файл для загрузки')
   }
 
-  const endpointVariants = ['/forecast/load-data/']
+  const endpointVariants = ['/forecast/upload-data/', '/forecast/load-data/']
   const fieldVariants = ['file', 'upload', 'data_file', 'excel']
 
   let lastError = null
