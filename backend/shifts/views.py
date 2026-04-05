@@ -615,7 +615,7 @@ class AddDraftSlotView(APIView):
                         shift_type=ScheduleEntry.ShiftType.FULL if is_first_day else ScheduleEntry.ShiftType.OFF,
                         waiters_needed=day_need_map.get(entry_date, 0),
                         work_start=time(10, 0) if is_first_day else None,
-                        work_end=time(22, 0) if is_first_day else None,
+                        work_end=time(23, 0) if is_first_day else None,
                         work_hours=12 if is_first_day else 0,
                     )
                 )

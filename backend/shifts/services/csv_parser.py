@@ -21,7 +21,7 @@ SHIFT_PATTERN_MAP = {
 }
 
 DEFAULT_SHIFT_TIMES = {
-    "full": (time(10, 0), time(22, 0)),
+    "full": (time(10, 0), time(23, 0)),
     "morning": (time(10, 0), time(16, 0)),
     "evening": (time(16, 0), time(1, 0)),
 }
