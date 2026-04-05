@@ -703,7 +703,7 @@ const createMockEntriesForWaiter = (monthDate, waiter) => {
     } else if (cycle === 1) {
       entries.push(buildMockShift(date, waiter, 'evening', '15:00', '23:00', 8))
     } else if (cycle === 2) {
-      entries.push(buildMockShift(date, waiter, 'full', '10:00', '22:00', 12))
+      entries.push(buildMockShift(date, waiter, 'full', '10:00', '23:00', 12))
     }
   }
 
@@ -727,7 +727,7 @@ const generateMockEntriesForMonth = (monthDate) => {
       } else if (cycle === 1) {
         entries.push(buildMockShift(date, waiter, 'evening', '15:00', '23:00', 8))
       } else if (cycle === 2) {
-        entries.push(buildMockShift(date, waiter, 'full', '10:00', '22:00', 12))
+        entries.push(buildMockShift(date, waiter, 'full', '10:00', '23:00', 12))
       }
     })
 
