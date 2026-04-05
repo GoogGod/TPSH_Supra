@@ -256,7 +256,7 @@ class ShiftsApiTests(APITestCase):
             shift_type=ScheduleEntry.ShiftType.FULL,
             waiters_needed=1,
             work_start=time(10, 0),
-            work_end=time(22, 0),
+            work_end=time(23, 0),
             work_hours=12,
         )
 
